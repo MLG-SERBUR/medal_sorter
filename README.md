@@ -1,0 +1,100 @@
+# Medal sorter — username pass
+
+Local, read-only first pass for Medal clips. It scans `W:\medal\Clips`, links matching files in `W:\medal\Edits`, samples source-video frames, runs local OCR, and maps detected text to names you supply.
+
+It never renames, moves, edits, or writes inside `W:\medal`.
+
+## Setup
+
+Python is managed by `uv`; no system Python needed.
+
+```powershell
+cd E:\GitHub\medal_sorter
+uv python install 3.12
+uv sync
+uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+uv run medal-sorter init
+```
+
+`pyproject.toml` uses the PyTorch CUDA 12.6 wheel index. Expected GPU check: `True NVIDIA GeForce RTX 2060`. If it shows `False`, update the NVIDIA driver or run with `--cpu`.
+
+First EasyOCR run downloads models into this workspace's `data\easyocr_models`; it does not use Medal folders.
+
+## Add friend groups
+
+Edit generated `friends.json`. Add each known display name and in-game alias:
+
+```json
+{
+  "users": [
+    {
+      "name": "Alex Discord",
+      "group": "Friday friends",
+      "aliases": ["A1ex", "AlexOnSteam"]
+    }
+  ]
+}
+```
+
+Keep the existing `schema_version`, `ignored_ocr_text`, and `matching` fields. `friends.example.json` shows the full shape.
+
+Known-name matching is deliberate. Full-screen OCR sees HUD labels, menus, scores, and chat. Matching against your supplied names gives useful group results without pretending arbitrary UI text is a username. Names shorter than five characters require an exact OCR match to limit false positives.
+
+## Run
+
+Benchmark five clips first:
+
+```powershell
+uv run medal-sorter usernames --medal-root W:\medal --limit 5
+```
+
+Then run all sources:
+
+```powershell
+uv run medal-sorter usernames --medal-root W:\medal
+
+# Print source clips under detected friend groups.
+uv run medal-sorter report
+```
+
+Useful variants:
+
+```powershell
+# One Medal game folder. Exact name.
+uv run medal-sorter usernames --game "Marvel Rivals"
+
+# Show catalog and planned OCR. No write.
+uv run medal-sorter usernames --dry-run
+
+# Re-OCR selected videos. Normal runs skip current results.
+uv run medal-sorter usernames --game "Marvel Rivals" --force
+
+# OCR raw screen text before adding friend mappings. No username resolution value yet.
+uv run medal-sorter usernames --limit 5 --collect-raw-text
+```
+
+Default sampling: evenly spaced frames, roughly every four seconds, at most eight frames per clip. Run five clips first. Tune `--sample-interval` and `--max-samples` only after checking the stored evidence.
+
+## Persistent files
+
+`clip_data.json` is the app-owned database. Keys are case-folded paths relative to `W:\medal`, so changing a drive letter does not break records. Each source record stores:
+
+- File size and modification-time fingerprint.
+- Linked `Edits` paths.
+- Raw OCR text, timestamp, confidence, and bounding box.
+- Resolved usernames, groups, scores, and evidence.
+- Reserved `clip_type`, `trim`, and `audio_channels` fields.
+
+`friends.json` is the app-owned name/group input mapping. Changing it recomputes matches from saved OCR observations; it does not re-read video frames. Source file changes, OCR sampling changes, pipeline updates, failed runs, and `--force` trigger only needed reanalysis.
+
+Writes to `clip_data.json` are atomic after discovery, every five clips, and at completion. Use `--checkpoint-every 1` if each clip needs a checkpoint. Empty username arrays mean analysis completed with no match; they are not retried endlessly.
+
+## Medal edits
+
+Source clips are the only videos OCR'd. Edits inherit their source record. The linker recognizes `--edit`, `--tr-edit`, `-tr-edit`, `-trim-<timestamp>`, and suffix variants such as `--edit-7fb6`. It only links an exact source basename; duplicate or missing source names remain `unresolved` in `clip_data.json` and are never guessed.
+
+Current library check: 936 source MP4s, 135 edit MP4s; 94 edits use a recognizable matching source basename. Unlinked edits remain visible but are skipped, avoiding accidental duplicate OCR.
+
+## Limits of first pass
+
+This pass does not classify clips, trim them, inspect audio, alter Medal metadata, or upload video. It is generic full-frame OCR. Game-specific HUD crops and unknown-name discovery should follow only after the five-clip benchmark shows which game UIs and name formats matter.

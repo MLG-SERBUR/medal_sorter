@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "users": [],
+  "example_user": {
+    "name": "PlayerDisplayName",
+    "group": "Friday friends",
+    "aliases": [
+      "InGameHandle"
+    ]
+  },
+  "ignored_ocr_text": [],
+  "matching": {
+    "minimum_ocr_confidence": 0.35,
+    "fuzzy_threshold": 90
+  }
+}

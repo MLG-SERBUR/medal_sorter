@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "medal-sorter"
+version = "0.1.0"
+description = "Local, read-only Medal clip username organizer"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "easyocr>=1.7.2",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.10.0.84",
+    "rapidfuzz>=3.10",
+    "torch>=2.7",
+    "torchvision>=0.22",
+]
+
+[project.scripts]
+medal-sorter = "medal_sorter.cli:main"
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/medal_sorter"]
