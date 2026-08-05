@@ -164,23 +164,24 @@ class OcrEngine:
                     batch_size=1,
                     workers=0,
                 )
+                frame_observations: list[dict[str, Any]] = []
                 for bounding_box, text, confidence in rows:
                     cleaned_text = " ".join(str(text).split())
                     numeric_confidence = float(confidence)
                     if not cleaned_text or numeric_confidence < settings.minimum_saved_confidence:
                         continue
-                    observations.append(
-                        {
-                            "seen_at_s": timestamp,
-                            "text": cleaned_text,
-                            "confidence": round(numeric_confidence, 4),
-                            "bounding_box": [
-                                [round(float(coordinate), 1) for coordinate in point]
-                                for point in bounding_box
-                            ],
-                        }
-                    )
-                if match_found and match_found(observations):
+                    obs = {
+                        "seen_at_s": timestamp,
+                        "text": cleaned_text,
+                        "confidence": round(numeric_confidence, 4),
+                        "bounding_box": [
+                            [round(float(coordinate), 1) for coordinate in point]
+                            for point in bounding_box
+                        ],
+                    }
+                    frame_observations.append(obs)
+                    observations.append(obs)
+                if match_found and frame_observations and match_found(frame_observations):
                     break
         finally:
             capture.release()

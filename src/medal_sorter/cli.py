@@ -11,6 +11,7 @@ from .matching import (
     load_friends_config,
     resolve_observations,
     resolution_settings_hash,
+    has_any_match,
 )
 from .ocr import OcrEngine, OcrSettings, OcrSetupError, PIPELINE_REVISION
 from .store import atomic_write_json, load_database, source_fingerprint, utc_now
@@ -198,9 +199,8 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
                 if engine is None:
                     engine = OcrEngine(workspace, force_cpu=arguments.cpu)
                 try:
-                    def match_found(observations: list[dict[str, Any]]) -> bool:
-                        res = resolve_observations(observations, config, users)
-                        return bool(res.get("usernames"))
+                    def match_found(new_obs: list[dict[str, Any]]) -> bool:
+                        return has_any_match(new_obs, config, users)
 
                     result = engine.analyze_video(source_path, settings, match_found)
                 except OcrSetupError:

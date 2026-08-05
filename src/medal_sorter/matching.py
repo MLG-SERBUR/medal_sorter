@@ -130,6 +130,34 @@ def _best_match_score(observed_text: str, target: str) -> float:
     return max(scores, default=0.0)
 
 
+def has_any_match(
+    observations: list[dict[str, Any]], config: dict[str, Any], users: list[KnownUser]
+) -> bool:
+    minimum_ocr_confidence = _config_number(config, "minimum_ocr_confidence", 0.35)
+    fuzzy_threshold = _config_number(config, "fuzzy_threshold", 90) / 100.0
+
+    ignored = {
+        normalize(item)
+        for item in config.get("ignored_ocr_text", [])
+        if isinstance(item, str) and normalize(item)
+    }
+
+    for observation in observations:
+        text = observation.get("text")
+        confidence = observation.get("confidence")
+        if not isinstance(text, str) or not isinstance(confidence, (int, float)):
+            continue
+        if confidence < minimum_ocr_confidence or normalize(text) in ignored:
+            continue
+
+        for user in users:
+            aliases = (user.name, *user.aliases)
+            best_alias = max(aliases, key=lambda alias: _best_match_score(text, alias))
+            if _best_match_score(text, best_alias) >= fuzzy_threshold:
+                return True
+    return False
+
+
 def resolve_observations(
     observations: list[dict[str, Any]], config: dict[str, Any], users: list[KnownUser]
 ) -> dict[str, Any]:
