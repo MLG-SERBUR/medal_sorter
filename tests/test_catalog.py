@@ -30,6 +30,7 @@ class CatalogTests(unittest.TestCase):
             summary = synchronize_catalog(database, root)
 
             self.assertEqual(summary.source_count, 1)
+            self.assertEqual(summary.audio_track_count, 0)
             self.assertEqual(summary.linked_edit_count, 5)
             source = database["records"]["clips/game/clip123.mp4"]
             self.assertEqual(len(source["links"]["edits"]), 5)
@@ -53,3 +54,25 @@ class CatalogTests(unittest.TestCase):
             edit = database["records"]["edits/samename--edit.mp4"]
             self.assertEqual(edit["source"]["state"], "unresolved")
             self.assertEqual(len(edit["source"]["candidates"]), 2)
+
+    def test_audio_tracks_linked_to_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            clips = root / "Clips" / "Marvel Rivals"
+            clips.mkdir(parents=True)
+            (clips / "ClipABC.mp4").touch()
+            (clips / "ClipABC_discord.mp4").touch()
+            (clips / "ClipABC_game.mp4").touch()
+            (clips / "ClipABC_mic.mp4").touch()
+
+            database = new_database(root)
+            summary = synchronize_catalog(database, root)
+
+            self.assertEqual(summary.source_count, 1)
+            self.assertEqual(summary.audio_track_count, 3)
+            source = database["records"]["clips/marvel rivals/clipabc.mp4"]
+            self.assertEqual(len(source["links"]["audio_tracks"]), 3)
+            discord_track = database["records"]["clips/marvel rivals/clipabc_discord.mp4"]
+            self.assertEqual(discord_track["kind"], "audio_track")
+            self.assertEqual(discord_track["track_kind"], "discord")
+            self.assertEqual(discord_track["source"]["state"], "linked")
