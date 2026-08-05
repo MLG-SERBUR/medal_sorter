@@ -7,6 +7,7 @@ from typing import Any
 
 from .catalog import CatalogSummary, source_records, synchronize_catalog
 from .matching import (
+    KnownUser,
     default_friends_config,
     load_friends_config,
     resolve_observations,
@@ -134,6 +135,13 @@ def _record_ocr_failure(record: dict[str, Any], error: Exception, settings: OcrS
     }
 
 
+def _record_resolution(record: dict[str, Any], config: dict[str, Any], users: list[KnownUser]) -> None:
+    ocr = record["analysis"]["usernames"]["ocr"]
+    resolution = resolve_observations(ocr.get("observations", []), config, users)
+    resolution["ocr_completed_at"] = ocr.get("completed_at")
+    record["analysis"]["usernames"]["resolution"] = resolution
+
+
 def _summary_line(summary: CatalogSummary) -> str:
     parts = [
         f"Discovered {summary.source_count} source MP4s, {summary.edit_count} edits",
@@ -217,16 +225,15 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
                     print(f"  failed: {error}", file=sys.stderr)
                 else:
                     _record_ocr_success(record, result, settings)
+                    _record_resolution(record, config, users)
                     analyzed += 1
+                    resolved += 1
                     obs_count = len(result.get("observations", []))
                     samples = result.get("decoded_sample_count", 0)
                     print(f"  done: {obs_count} text observations from {samples} frames")
 
             if _needs_resolution(record, resolution_hash):
-                ocr = record["analysis"]["usernames"]["ocr"]
-                resolution = resolve_observations(ocr.get("observations", []), config, users)
-                resolution["ocr_completed_at"] = ocr.get("completed_at")
-                record["analysis"]["usernames"]["resolution"] = resolution
+                _record_resolution(record, config, users)
                 resolved += 1
             if index % arguments.checkpoint_every == 0:
                 atomic_write_json(database_path, database)
