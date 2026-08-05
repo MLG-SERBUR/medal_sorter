@@ -10,14 +10,22 @@ from .store import file_details, relative_display_path, relative_key, utc_now
 
 VIDEO_SUFFIXES = {".mp4"}
 EDIT_MARKER = re.compile(r"(?i)(?:--edit|--tr-edit|-tr-edit|-trim-[0-9]+)")
-AUDIO_TRACK_SUFFIX = re.compile(r"(?i)_(discord|game|mic)$")
+IGNORED_PATTERNS = (
+    (re.compile(r"(?i)_(discord|game|mic)$"), "medal_editor_audio_export"),
+    (re.compile(r"(?i)^temp_"), "temp_file"),
+    (re.compile(r"(?i)^uncapped_"), "uncapped_script_export"),
+    (re.compile(r"(?i)-merged-"), "losslesscut_merge_export"),
+    (re.compile(r"(?i)-cut"), "losslesscut_cut_export"),
+    (re.compile(r"^-[0-9]+$"), "temp_file"),
+    (re.compile(r"(?i)(?<!trim)(?<!edit)-[0-9]{9,}$"), "external_timestamp_cut"),
+)
 
 
 @dataclass(frozen=True)
 class CatalogSummary:
     source_count: int
     edit_count: int
-    audio_track_count: int
+    ignored_count: int
     linked_edit_count: int
     unresolved_edit_count: int
 
@@ -56,27 +64,22 @@ def _edit_analysis() -> dict[str, Any]:
     }
 
 
-def _audio_track_analysis() -> dict[str, Any]:
+def _ignored_analysis() -> dict[str, Any]:
     return {
-        "usernames": {"state": "not_applicable"},
+        "usernames": {"state": "ignored"},
         "clip_type": None,
         "trim": None,
         "audio_channels": None,
     }
 
 
-def _is_audio_track(path: Path) -> str | None:
-    """Return the track kind (discord/game/mic) if path is an audio-only track, else None."""
-    match = AUDIO_TRACK_SUFFIX.search(path.stem)
-    return match.group(1).casefold() if match else None
-
-
-def _audio_track_parent_stem(path: Path) -> str | None:
-    """Return the stem of the parent clip for an audio track file."""
-    match = AUDIO_TRACK_SUFFIX.search(path.stem)
-    if match is None or match.start() == 0:
-        return None
-    return path.stem[: match.start()]
+def _is_ignored(path: Path) -> str | None:
+    """Return the reason if path is an extra/ignored file (audio exports, temp, scripts), else None."""
+    stem = path.stem
+    for pattern, reason in IGNORED_PATTERNS:
+        if pattern.search(stem):
+            return reason
+    return None
 
 
 def _ensure_source_record(
@@ -129,25 +132,25 @@ def _ensure_edit_record(
     return key, record
 
 
-def _ensure_audio_track_record(
-    records: dict[str, Any], path: Path, medal_root: Path, track_kind: str,
+def _ensure_ignored_record(
+    records: dict[str, Any], path: Path, medal_root: Path, reason: str
 ) -> tuple[str, dict[str, Any]]:
     key = relative_key(path, medal_root)
     record = records.get(key)
-    if not isinstance(record, dict) or record.get("kind") != "audio_track":
+    if not isinstance(record, dict) or record.get("kind") != "ignored":
         record = {
-            "kind": "audio_track",
-            "track_kind": track_kind,
+            "kind": "ignored",
+            "reason": reason,
             "path": relative_display_path(path, medal_root),
             "file": file_details(path),
-            "analysis": _audio_track_analysis(),
+            "analysis": _ignored_analysis(),
         }
         records[key] = record
     else:
         record["path"] = relative_display_path(path, medal_root)
         record["file"] = file_details(path)
-        record["track_kind"] = track_kind
-        record.setdefault("analysis", _audio_track_analysis())
+        record["reason"] = reason
+        record.setdefault("analysis", _ignored_analysis())
     return key, record
 
 
@@ -170,43 +173,41 @@ def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSu
     # Retain records for files Medal no longer has, but never send those stale
     # records back through OCR on a later run.
     for record in records.values():
-        if isinstance(record, dict) and record.get("kind") in {"source", "edit"}:
+        if isinstance(record, dict) and record.get("kind") in {"source", "edit", "ignored"}:
             record["present"] = False
 
     source_paths = _videos_in(clips_root)
     source_stems: dict[str, list[str]] = {}
     current_sources: dict[str, dict[str, Any]] = {}
-    audio_track_count = 0
+    ignored_count = 0
+
     for path in source_paths:
-        track_kind = _is_audio_track(path)
-        if track_kind is not None:
-            # Audio-only channel export (e.g. _discord.mp4). Link to parent, skip OCR.
-            at_key, at_record = _ensure_audio_track_record(records, path, medal_root, track_kind)
-            at_record["present"] = True
-            parent_stem = _audio_track_parent_stem(path)
-            parent_candidates = source_stems.get(parent_stem.casefold(), []) if parent_stem else []
-            if len(parent_candidates) == 1:
-                at_record["source"] = {"state": "linked", "record_key": parent_candidates[0]}
-                current_sources[parent_candidates[0]]["links"].setdefault("audio_tracks", []).append(at_key)
-            else:
-                at_record["source"] = {
-                    "state": "unresolved",
-                    "candidate_stem": parent_stem,
-                    "candidates": parent_candidates,
-                }
-            audio_track_count += 1
+        ignored_reason = _is_ignored(path)
+        if ignored_reason is not None:
+            ig_key, ig_record = _ensure_ignored_record(records, path, medal_root, ignored_reason)
+            ig_record["present"] = True
+            ignored_count += 1
             continue
+
         key, record = _ensure_source_record(records, path, medal_root)
         record["present"] = True
         record["links"]["edits"] = []
-        record["links"].setdefault("audio_tracks", [])
         current_sources[key] = record
         source_stems.setdefault(path.stem.casefold(), []).append(key)
 
     linked = 0
     unresolved = 0
     edit_paths = _videos_in(edits_root)
+    actual_edits = 0
     for path in edit_paths:
+        ignored_reason = _is_ignored(path)
+        if ignored_reason is not None:
+            ig_key, ig_record = _ensure_ignored_record(records, path, medal_root, ignored_reason)
+            ig_record["present"] = True
+            ignored_count += 1
+            continue
+
+        actual_edits += 1
         edit_key, edit_record = _ensure_edit_record(records, path, medal_root)
         edit_record["present"] = True
         parent_stem = _parent_stem(path)
@@ -236,13 +237,12 @@ def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSu
 
     for source_record in current_sources.values():
         source_record["links"]["edits"].sort()
-        if "audio_tracks" in source_record["links"]:
-            source_record["links"]["audio_tracks"].sort()
+
     database["last_discovery_at"] = utc_now()
     return CatalogSummary(
-        source_count=len(source_paths) - audio_track_count,
-        edit_count=len(edit_paths),
-        audio_track_count=audio_track_count,
+        source_count=len(current_sources),
+        edit_count=actual_edits,
+        ignored_count=ignored_count,
         linked_edit_count=linked,
         unresolved_edit_count=unresolved,
     )

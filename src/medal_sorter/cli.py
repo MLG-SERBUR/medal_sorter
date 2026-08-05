@@ -137,8 +137,8 @@ def _summary_line(summary: CatalogSummary) -> str:
     parts = [
         f"Discovered {summary.source_count} source MP4s, {summary.edit_count} edits",
     ]
-    if summary.audio_track_count:
-        parts.append(f", {summary.audio_track_count} audio tracks")
+    if summary.ignored_count:
+        parts.append(f", ignored {summary.ignored_count} extra artifacts")
     parts.append(f". Linked {summary.linked_edit_count}; unresolved edits {summary.unresolved_edit_count}.")
     return "".join(parts)
 
