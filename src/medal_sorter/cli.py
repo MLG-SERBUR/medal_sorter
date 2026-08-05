@@ -198,7 +198,11 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
                 if engine is None:
                     engine = OcrEngine(workspace, force_cpu=arguments.cpu)
                 try:
-                    result = engine.analyze_video(source_path, settings)
+                    def match_found(observations: list[dict[str, Any]]) -> bool:
+                        res = resolve_observations(observations, config, users)
+                        return bool(res.get("usernames"))
+
+                    result = engine.analyze_video(source_path, settings, match_found)
                 except OcrSetupError:
                     atomic_write_json(database_path, database)
                     raise
