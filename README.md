@@ -22,21 +22,37 @@ First EasyOCR run downloads models into this workspace's `data\easyocr_models`; 
 
 ## Add friend groups
 
-Edit generated `friends.json`. Add each known display name and in-game alias:
+The friend config can be JSON or YAML. Groups are top-level sections and each known name is listed under its group.
 
-```json
-{
-  "users": [
-    {
-      "name": "Alex Discord",
-      "group": "Friday friends",
-      "aliases": ["A1ex", "AlexOnSteam"]
-    }
-  ]
-}
+```yaml
+schema_version: 1
+ignored_ocr_text:
+  - Play
+  - Settings
+  - Headshot
+matching:
+  minimum_ocr_confidence: 0.35
+  fuzzy_threshold: 90
+
+friday_friends:
+  - AlexDiscord
+  - A1ex
+  - AlexOnSteam
+
+raid_team:
+  - BigTank
+  - Healer123
+  - DPS_Zero
 ```
 
-Keep the existing `schema_version`, `ignored_ocr_text`, and `matching` fields. `friends.example.json` shows the full shape.
+Strings under each group are treated as known names. If you want a canonical name plus aliases, use a mapping:
+
+```yaml
+mygroup:
+  - "Alex Discord": ["A1ex", "AlexOnSteam"]
+```
+
+If you prefer JSON, the old `users` array format still works. `friends.example.yaml` shows the new shape.
 
 Known-name matching is deliberate. Full-screen OCR sees HUD labels, menus, scores, and chat. Matching against your supplied names gives useful group results without pretending arbitrary UI text is a username. Names shorter than five characters require an exact OCR match to limit false positives.
 

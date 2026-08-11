@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,33 +24,26 @@ class KnownUser:
 def default_friends_config() -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "users": [],
-        "example_user": {
-            "name": "PlayerDisplayName",
-            "group": "Friday friends",
-            "aliases": ["InGameHandle"],
-        },
         "ignored_ocr_text": [],
         "matching": {
             "minimum_ocr_confidence": 0.35,
             "fuzzy_threshold": 90,
         },
+        "groups": {},
     }
 
 
 def load_friends_config(path: Path) -> tuple[dict[str, Any], list[KnownUser]]:
-    import json
-
-    try:
-        config = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Cannot parse friend config {path}: {error}") from error
+    config = _load_friends_config(path)
     if not isinstance(config, dict):
-        raise ValueError(f"Friend config {path} must contain a JSON object.")
+        raise ValueError(f"Friend config {path} must contain a JSON or YAML mapping.")
     if config.get("schema_version") != 1:
         raise ValueError("Friend config schema_version must be 1.")
 
     raw_users = config.get("users")
+    if raw_users is None:
+        raw_users = _users_from_group_sections(config)
+        config = {**config, "users": raw_users}
     if not isinstance(raw_users, list):
         raise ValueError("Friend config users must be an array.")
 
@@ -78,6 +72,105 @@ def load_friends_config(path: Path) -> tuple[dict[str, Any], list[KnownUser]]:
         users.append(KnownUser(name=name.strip(), group=group.strip() if group else None, aliases=aliases))
 
     return config, users
+
+
+def _load_friends_config(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
+    if suffix in {".yaml", ".yml"}:
+        try:
+            import yaml
+        except ImportError as error:
+            raise RuntimeError("PyYAML is required to parse YAML friend config files.") from error
+        try:
+            return yaml.safe_load(text)
+        except Exception as error:
+            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            import yaml
+        except ImportError as error:
+            raise ValueError(
+                f"Cannot parse friend config {path} as JSON and PyYAML is not installed."
+            ) from error
+        try:
+            return yaml.safe_load(text)
+        except Exception as error:
+            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
+
+
+def _users_from_group_sections(config: dict[str, Any]) -> list[dict[str, Any]]:
+    known_keys = {"schema_version", "users", "groups", "ignored_ocr_text", "matching", "example_user"}
+    groups = config.get("groups")
+    if groups is None:
+        groups = {key: value for key, value in config.items() if key not in known_keys}
+    if not groups:
+        return []
+    if not isinstance(groups, dict):
+        raise ValueError("Friend config groups must be a mapping of group names to username lists.")
+
+    users: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for group_name, entries in groups.items():
+        if not isinstance(group_name, str) or not group_name.strip():
+            raise ValueError("Friend config group names must be non-empty strings.")
+        if not isinstance(entries, list):
+            raise ValueError(f"group {group_name!r} must contain a list of usernames.")
+
+        normalized_group = group_name.strip()
+        for entry_index, entry in enumerate(entries):
+            if isinstance(entry, str):
+                name = entry.strip()
+                if not name:
+                    raise ValueError(f"groups[{group_name}][{entry_index}] contains an empty name.")
+                normalized_name = normalize(name)
+                if not normalized_name:
+                    continue
+                if normalized_name in seen:
+                    continue
+                seen.add(normalized_name)
+                users.append({"name": name, "group": normalized_group, "aliases": []})
+                continue
+
+            if isinstance(entry, dict) and len(entry) == 1:
+                canonical_name, alias_values = next(iter(entry.items()))
+                if not isinstance(canonical_name, str) or not canonical_name.strip():
+                    raise ValueError(f"groups[{group_name}][{entry_index}] has an invalid canonical name.")
+                if isinstance(alias_values, str):
+                    alias_values = [alias_values]
+                elif isinstance(alias_values, list) and all(isinstance(item, str) for item in alias_values):
+                    alias_values = [item for item in alias_values if item.strip()]
+                else:
+                    raise ValueError(
+                        f"groups[{group_name}][{entry_index}] must map a name to a string or list of strings."
+                    )
+
+                for name in [canonical_name, *alias_values]:
+                    if not isinstance(name, str) or not name.strip():
+                        raise ValueError(f"groups[{group_name}][{entry_index}] contains an invalid name.")
+                    normalized_name = normalize(name)
+                    if not normalized_name:
+                        continue
+                    if normalized_name in seen:
+                        continue
+                    seen.add(normalized_name)
+                    users.append({"name": name.strip(), "group": normalized_group, "aliases": []})
+                continue
+
+            raise ValueError(
+                f"groups[{group_name}][{entry_index}] must be a string or single-key mapping."
+            )
+
+    return users
 
 
 def normalize(value: str) -> str:

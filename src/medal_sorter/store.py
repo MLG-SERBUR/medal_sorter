@@ -70,6 +70,32 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
         raise
 
 
+def atomic_write_yaml(path: Path, value: dict[str, Any]) -> None:
+    try:
+        import yaml
+    except ImportError as error:
+        raise RuntimeError("PyYAML is required to write YAML friend config files.") from error
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = yaml.safe_dump(value, sort_keys=False, allow_unicode=True)
+    if not payload.endswith("\n"):
+        payload += "\n"
+
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent, text=True
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 def relative_key(path: Path, medal_root: Path) -> str:
     return path.resolve().relative_to(medal_root.resolve()).as_posix().casefold()
 

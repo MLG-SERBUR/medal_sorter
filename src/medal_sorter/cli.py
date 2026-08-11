@@ -20,7 +20,7 @@ from .store import atomic_write_json, load_database, source_fingerprint, utc_now
 
 DEFAULT_MEDAL_ROOT = Path(r"W:\medal")
 DATABASE_FILENAME = "clip_data.json"
-FRIENDS_FILENAME = "friends.json"
+FRIENDS_FILENAMES = ("friends.yaml", "friends.yml", "friends.json")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -63,7 +63,15 @@ def _parser() -> argparse.ArgumentParser:
 
 def _paths(workspace: Path) -> tuple[Path, Path, Path]:
     resolved = workspace.resolve()
-    return resolved, resolved / DATABASE_FILENAME, resolved / FRIENDS_FILENAME
+    return resolved, resolved / DATABASE_FILENAME, _friends_path(resolved)
+
+
+def _friends_path(workspace: Path) -> Path:
+    for filename in FRIENDS_FILENAMES:
+        candidate = workspace / filename
+        if candidate.exists():
+            return candidate
+    return workspace / FRIENDS_FILENAMES[0]
 
 
 def _initialize(workspace: Path) -> int:
@@ -73,7 +81,10 @@ def _initialize(workspace: Path) -> int:
         atomic_write_json(database_path, load_database(database_path, DEFAULT_MEDAL_ROOT))
         created.append(database_path.name)
     if not friends_path.exists():
-        atomic_write_json(friends_path, default_friends_config())
+        if friends_path.suffix.lower() in {".yaml", ".yml"}:
+            atomic_write_yaml(friends_path, default_friends_config())
+        else:
+            atomic_write_json(friends_path, default_friends_config())
         created.append(friends_path.name)
     if created:
         print(f"Created: {', '.join(created)}")
@@ -163,7 +174,10 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
         raise FileNotFoundError(f"Missing Medal Clips directory: {medal_root / 'Clips'}")
     if not friends_path.exists():
         _initialize(workspace)
-        print("No OCR run. Add users to friends.json, or use --collect-raw-text.", file=sys.stderr)
+        print(
+            f"No OCR run. Add users to {friends_path.name}, or use --collect-raw-text.",
+            file=sys.stderr,
+        )
         return 2
 
     database = load_database(database_path, medal_root)
