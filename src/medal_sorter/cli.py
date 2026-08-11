@@ -20,7 +20,7 @@ from .store import atomic_write_json, load_database, source_fingerprint, utc_now
 
 DEFAULT_MEDAL_ROOT = Path(r"W:\medal")
 DATABASE_FILENAME = "clip_data.json"
-FRIENDS_FILENAMES = ("friends.yaml", "friends.yml", "friends.json")
+FRIENDS_FILENAMES = ("friends.yaml", "friends.yml")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -81,10 +81,7 @@ def _initialize(workspace: Path) -> int:
         atomic_write_json(database_path, load_database(database_path, DEFAULT_MEDAL_ROOT))
         created.append(database_path.name)
     if not friends_path.exists():
-        if friends_path.suffix.lower() in {".yaml", ".yml"}:
-            atomic_write_yaml(friends_path, default_friends_config())
-        else:
-            atomic_write_json(friends_path, default_friends_config())
+        atomic_write_yaml(friends_path, default_friends_config())
         created.append(friends_path.name)
     if created:
         print(f"Created: {', '.join(created)}")
@@ -201,7 +198,7 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
     if not users and planned and not arguments.collect_raw_text:
         atomic_write_json(database_path, database)
         print(
-            "No known users in friends.json. Add mappings first, or rerun with --collect-raw-text.",
+            f"No known users in {friends_path.name}. Add mappings first, or rerun with --collect-raw-text.",
             file=sys.stderr,
         )
         return 2

@@ -22,7 +22,7 @@ First EasyOCR run downloads models into this workspace's `data\easyocr_models`; 
 
 ## Add friend groups
 
-The friend config can be JSON or YAML. Groups are top-level sections and each known name is listed under its group.
+The friend config is YAML only. Groups are top-level sections and each known name is listed under its group.
 
 ```yaml
 schema_version: 1
@@ -52,7 +52,7 @@ mygroup:
   - "Alex Discord": ["A1ex", "AlexOnSteam"]
 ```
 
-If you prefer JSON, the old `users` array format still works. `friends.example.yaml` shows the new shape.
+`friends.example.yaml` shows the supported shape.
 
 Known-name matching is deliberate. Full-screen OCR sees HUD labels, menus, scores, and chat. Matching against your supplied names gives useful group results without pretending arbitrary UI text is a username. Names shorter than five characters require an exact OCR match to limit false positives.
 
@@ -101,7 +101,7 @@ Default sampling: evenly spaced frames, roughly every four seconds, at most eigh
 - Resolved usernames, groups, scores, and evidence.
 - Reserved `clip_type`, `trim`, and `audio_channels` fields.
 
-`friends.json` is the app-owned name/group input mapping. Changing it recomputes matches from saved OCR observations; it does not re-read video frames. Source file changes, OCR sampling changes, pipeline updates, failed runs, and `--force` trigger only needed reanalysis.
+`friends.yaml` is the app-owned name/group input mapping. Changing it recomputes matches from saved OCR observations; it does not re-read video frames. Source file changes, OCR sampling changes, pipeline updates, failed runs, and `--force` trigger only needed reanalysis.
 
 Writes to `clip_data.json` are atomic after discovery, every five clips, and at completion. Use `--checkpoint-every 1` if each clip needs a checkpoint. Empty username arrays mean analysis completed with no match; they are not retried endlessly.
 

@@ -36,7 +36,7 @@ def default_friends_config() -> dict[str, Any]:
 def load_friends_config(path: Path) -> tuple[dict[str, Any], list[KnownUser]]:
     config = _load_friends_config(path)
     if not isinstance(config, dict):
-        raise ValueError(f"Friend config {path} must contain a JSON or YAML mapping.")
+        raise ValueError(f"Friend config {path} must contain a YAML mapping.")
     if config.get("schema_version") != 1:
         raise ValueError("Friend config schema_version must be 1.")
 
@@ -77,34 +77,16 @@ def load_friends_config(path: Path) -> tuple[dict[str, Any], list[KnownUser]]:
 def _load_friends_config(path: Path) -> Any:
     text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
-    if suffix == ".json":
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
-    if suffix in {".yaml", ".yml"}:
-        try:
-            import yaml
-        except ImportError as error:
-            raise RuntimeError("PyYAML is required to parse YAML friend config files.") from error
-        try:
-            return yaml.safe_load(text)
-        except Exception as error:
-            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
-
+    if suffix not in {".yaml", ".yml"}:
+        raise ValueError("Friend config must use a .yaml or .yml extension.")
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        try:
-            import yaml
-        except ImportError as error:
-            raise ValueError(
-                f"Cannot parse friend config {path} as JSON and PyYAML is not installed."
-            ) from error
-        try:
-            return yaml.safe_load(text)
-        except Exception as error:
-            raise ValueError(f"Cannot parse friend config {path}: {error}") from error
+        import yaml
+    except ImportError as error:
+        raise RuntimeError("PyYAML is required to parse YAML friend config files.") from error
+    try:
+        return yaml.safe_load(text)
+    except Exception as error:
+        raise ValueError(f"Cannot parse friend config {path}: {error}") from error
 
 
 def _users_from_group_sections(config: dict[str, Any]) -> list[dict[str, Any]]:
