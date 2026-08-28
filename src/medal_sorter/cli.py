@@ -189,13 +189,26 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
     if arguments.limit is not None:
         selected = selected[: arguments.limit]
 
-    current = sum(_current_ocr(record, settings) and not arguments.force for _, record in selected)
-    planned = len(selected) - current
-    print(_summary_line(summary))
-    print(f"Selected source clips: {len(selected)}. OCR current: {current}. OCR planned: {planned}.")
+    ocr_work = [
+        (key, record)
+        for key, record in selected
+        if arguments.force or not _current_ocr(record, settings)
+    ]
+    resolution_work = [
+        (key, record)
+        for key, record in selected
+        if not (arguments.force or not _current_ocr(record, settings))
+        and _needs_resolution(record, resolution_hash)
+    ]
+    print(
+        f"Selected source clips: {len(selected)}. "
+        f"OCR current: {len(selected) - len(ocr_work)}. "
+        f"OCR planned: {len(ocr_work)}. "
+        f"Resolution refresh: {len(resolution_work)}."
+    )
     if arguments.dry_run:
         return 0
-    if not users and planned and not arguments.collect_raw_text:
+    if not users and ocr_work and not arguments.collect_raw_text:
         atomic_write_json(database_path, database)
         print(
             f"No known users in {friends_path.name}. Add mappings first, or rerun with --collect-raw-text.",
@@ -210,46 +223,49 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
     resolved = 0
     interrupted = False
     try:
-        for index, (key, record) in enumerate(selected, start=1):
-            requires_ocr = arguments.force or not _current_ocr(record, settings)
-            if requires_ocr:
-                source_path = medal_root / Path(record["path"])
-                print(f"[{index}/{len(selected)}] OCR {record['path']}")
-                if engine is None:
-                    engine = OcrEngine(workspace, force_cpu=arguments.cpu)
-                try:
-                    def match_found(new_obs: list[dict[str, Any]]) -> bool:
-                        return has_any_match(new_obs, config, users)
+        for ocr_index, (key, record) in enumerate(ocr_work, start=1):
+            source_path = medal_root / Path(record["path"])
+            print(f"[{ocr_index}/{len(ocr_work)}] OCR {record['path']}")
+            if engine is None:
+                engine = OcrEngine(workspace, force_cpu=arguments.cpu)
+            try:
+                def match_found(new_obs: list[dict[str, Any]]) -> bool:
+                    return has_any_match(new_obs, config, users)
 
-                    result = engine.analyze_video(source_path, settings, match_found)
-                except OcrSetupError:
-                    atomic_write_json(database_path, database)
-                    raise
-                except KeyboardInterrupt:
-                    # Mid-OCR interrupt: do NOT mark this clip as done.
-                    print(f"\n  interrupted during OCR — clip not saved.", file=sys.stderr)
-                    interrupted = True
-                    break
-                except Exception as error:
-                    _record_ocr_failure(record, error, settings)
-                    failed += 1
-                    print(f"  failed: {error}", file=sys.stderr)
-                else:
-                    _record_ocr_success(record, result, settings)
-                    _record_resolution(record, config, users)
-                    analyzed += 1
-                    resolved += 1
-                    obs_count = len(result.get("observations", []))
-                    samples = result.get("decoded_sample_count", 0)
-                    print(f"  done: {obs_count} text observations from {samples} frames")
+                result = engine.analyze_video(source_path, settings, match_found)
+            except OcrSetupError:
+                atomic_write_json(database_path, database)
+                raise
+            except KeyboardInterrupt:
+                print(f"\n  interrupted during OCR — clip not saved.", file=sys.stderr)
+                interrupted = True
+                break
+            except Exception as error:
+                _record_ocr_failure(record, error, settings)
+                failed += 1
+                print(f"  failed: {error}", file=sys.stderr)
+            else:
+                _record_ocr_success(record, result, settings)
+                _record_resolution(record, config, users)
+                analyzed += 1
+                resolved += 1
+                obs_count = len(result.get("observations", []))
+                samples = result.get("decoded_sample_count", 0)
+                print(f"  done: {obs_count} text observations from {samples} frames")
 
-            if _needs_resolution(record, resolution_hash):
+            if ocr_index % arguments.checkpoint_every == 0:
+                atomic_write_json(database_path, database)
+
+        if not interrupted:
+            for resolve_index, (key, record) in enumerate(resolution_work, start=1):
+                print(f"[{resolve_index}/{len(resolution_work)}] Resolve {record['path']}")
                 _record_resolution(record, config, users)
                 resolved += 1
-            if index % arguments.checkpoint_every == 0:
-                atomic_write_json(database_path, database)
+                print(f"  done: resolution refreshed")
+
+                if resolve_index % arguments.checkpoint_every == 0:
+                    atomic_write_json(database_path, database)
     except KeyboardInterrupt:
-        # Interrupt between clips (not during OCR).
         interrupted = True
         print("\nInterrupted.", file=sys.stderr)
 
