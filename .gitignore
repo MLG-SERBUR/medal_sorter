@@ -187,3 +187,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 friends.yaml
+clip_data.sqlite

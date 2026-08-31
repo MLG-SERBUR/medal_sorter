@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,10 +85,9 @@ def _is_ignored(path: Path) -> str | None:
 
 
 def _ensure_source_record(
-    records: dict[str, Any], path: Path, medal_root: Path
+    record: dict[str, Any] | None, path: Path, medal_root: Path
 ) -> tuple[str, dict[str, Any]]:
     key = relative_key(path, medal_root)
-    record = records.get(key)
     if not isinstance(record, dict) or record.get("kind") != "source":
         record = {
             "kind": "source",
@@ -95,7 +96,6 @@ def _ensure_source_record(
             "links": {"edits": []},
             "analysis": _source_analysis(),
         }
-        records[key] = record
     else:
         record["path"] = relative_display_path(path, medal_root)
         record["file"] = file_details(path)
@@ -109,10 +109,9 @@ def _ensure_source_record(
 
 
 def _ensure_edit_record(
-    records: dict[str, Any], path: Path, medal_root: Path
+    record: dict[str, Any] | None, path: Path, medal_root: Path
 ) -> tuple[str, dict[str, Any]]:
     key = relative_key(path, medal_root)
-    record = records.get(key)
     if not isinstance(record, dict) or record.get("kind") != "edit":
         record = {
             "kind": "edit",
@@ -120,7 +119,6 @@ def _ensure_edit_record(
             "file": file_details(path),
             "analysis": _edit_analysis(),
         }
-        records[key] = record
     else:
         record["path"] = relative_display_path(path, medal_root)
         record["file"] = file_details(path)
@@ -133,10 +131,9 @@ def _ensure_edit_record(
 
 
 def _ensure_ignored_record(
-    records: dict[str, Any], path: Path, medal_root: Path, reason: str
+    record: dict[str, Any] | None, path: Path, medal_root: Path, reason: str
 ) -> tuple[str, dict[str, Any]]:
     key = relative_key(path, medal_root)
-    record = records.get(key)
     if not isinstance(record, dict) or record.get("kind") != "ignored":
         record = {
             "kind": "ignored",
@@ -145,7 +142,6 @@ def _ensure_ignored_record(
             "file": file_details(path),
             "analysis": _ignored_analysis(),
         }
-        records[key] = record
     else:
         record["path"] = relative_display_path(path, medal_root)
         record["file"] = file_details(path)

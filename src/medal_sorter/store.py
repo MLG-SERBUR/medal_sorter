@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
+import sqlite3
 import tempfile
+import os
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -21,53 +22,17 @@ def json_hash(value: Any) -> str:
     return f"sha256:{sha256(encoded.encode('utf-8')).hexdigest()}"
 
 
-def new_database(medal_root: Path) -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "medal_root": str(medal_root.resolve()),
-        "records": {},
-    }
-
-
-def load_database(path: Path, medal_root: Path) -> dict[str, Any]:
-    if not path.exists():
-        return new_database(medal_root)
-
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Cannot parse database {path}: {error}") from error
-
-    if not isinstance(loaded, dict):
-        raise ValueError(f"Database {path} must contain a JSON object.")
-    if loaded.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(
-            f"Unsupported database schema {loaded.get('schema_version')!r}; expected {SCHEMA_VERSION}."
-        )
-    if not isinstance(loaded.get("records"), dict):
-        raise ValueError(f"Database {path} has no valid records object.")
-
-    loaded["medal_root"] = str(medal_root.resolve())
-    return loaded
-
-
-def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+def get_db(path: Path, medal_root: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    conn = sqlite3.connect(path)
+    conn.execute('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)')
+    conn.execute('CREATE TABLE IF NOT EXISTS records (clip_path TEXT PRIMARY KEY, data TEXT)')
+    
+    conn.execute('INSERT OR REPLACE INTO metadata VALUES (?, ?)', ('schema_version', str(SCHEMA_VERSION)))
+    conn.execute('INSERT OR REPLACE INTO metadata VALUES (?, ?)', ('medal_root', str(medal_root.resolve())))
+    conn.commit()
+    return conn
 
-    file_descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent, text=True
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary_path, path)
-    except BaseException:
-        temporary_path.unlink(missing_ok=True)
-        raise
 
 
 def atomic_write_yaml(path: Path, value: dict[str, Any]) -> None:

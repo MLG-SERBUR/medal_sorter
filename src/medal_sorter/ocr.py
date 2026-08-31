@@ -174,10 +174,6 @@ class OcrEngine:
                         "seen_at_s": timestamp,
                         "text": cleaned_text,
                         "confidence": round(numeric_confidence, 4),
-                        "bounding_box": [
-                            [round(float(coordinate), 1) for coordinate in point]
-                            for point in bounding_box
-                        ],
                     }
                     frame_observations.append(obs)
                     observations.append(obs)

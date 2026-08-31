@@ -272,7 +272,6 @@ def resolve_observations(
                 "match_score": round(score, 4),
                 "confidence": round(float(confidence) * score, 4),
                 "seen_at_s": observation.get("seen_at_s"),
-                "bounding_box": observation.get("bounding_box"),
             }
             entry = resolved.setdefault(
                 user.name,
