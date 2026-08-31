@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,11 +17,11 @@ from .matching import (
     has_any_match,
 )
 from .ocr import OcrEngine, OcrSettings, OcrSetupError, PIPELINE_REVISION
-from .store import atomic_write_json, load_database, source_fingerprint, utc_now
+from .store import atomic_write_yaml, get_db, source_fingerprint, utc_now
 
 
 DEFAULT_MEDAL_ROOT = Path(r"W:\medal")
-DATABASE_FILENAME = "clip_data.json"
+DATABASE_FILENAME = "clip_data.sqlite"
 FRIENDS_FILENAMES = ("friends.yaml", "friends.yml")
 
 
@@ -78,7 +80,8 @@ def _initialize(workspace: Path) -> int:
     workspace, database_path, friends_path = _paths(workspace)
     created: list[str] = []
     if not database_path.exists():
-        atomic_write_json(database_path, load_database(database_path, DEFAULT_MEDAL_ROOT))
+        conn = get_db(database_path, DEFAULT_MEDAL_ROOT)
+        conn.close()
         created.append(database_path.name)
     if not friends_path.exists():
         atomic_write_yaml(friends_path, default_friends_config())
@@ -177,144 +180,152 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
         )
         return 2
 
-    database = load_database(database_path, medal_root)
-    summary = synchronize_catalog(database, medal_root)
-    config, users = load_friends_config(friends_path)
-    settings = OcrSettings(
-        sample_interval_seconds=arguments.sample_interval,
-        maximum_samples=arguments.max_samples,
-    )
-    resolution_hash = resolution_settings_hash(config, users)
-    selected = source_records(database, arguments.game)
-    if arguments.limit is not None:
-        selected = selected[: arguments.limit]
-
-    ocr_work = [
-        (key, record)
-        for key, record in selected
-        if arguments.force or not _current_ocr(record, settings)
-    ]
-    resolution_work = [
-        (key, record)
-        for key, record in selected
-        if not (arguments.force or not _current_ocr(record, settings))
-        and _needs_resolution(record, resolution_hash)
-    ]
-    print(
-        f"Selected source clips: {len(selected)}. "
-        f"OCR current: {len(selected) - len(ocr_work)}. "
-        f"OCR planned: {len(ocr_work)}. "
-        f"Resolution refresh: {len(resolution_work)}."
-    )
-    if arguments.dry_run:
-        return 0
-    if not users and ocr_work and not arguments.collect_raw_text:
-        atomic_write_json(database_path, database)
-        print(
-            f"No known users in {friends_path.name}. Add mappings first, or rerun with --collect-raw-text.",
-            file=sys.stderr,
-        )
-        return 2
-
-    atomic_write_json(database_path, database)
-    engine: OcrEngine | None = None
-    analyzed = 0
-    failed = 0
-    resolved = 0
-    interrupted = False
+    conn = get_db(database_path, medal_root)
     try:
-        for ocr_index, (key, record) in enumerate(ocr_work, start=1):
-            source_path = medal_root / Path(record["path"])
-            print(f"[{ocr_index}/{len(ocr_work)}] OCR {record['path']}")
-            if engine is None:
-                engine = OcrEngine(workspace, force_cpu=arguments.cpu)
-            try:
-                def match_found(new_obs: list[dict[str, Any]]) -> bool:
-                    return has_any_match(new_obs, config, users)
-
-                result = engine.analyze_video(source_path, settings, match_found)
-            except OcrSetupError:
-                atomic_write_json(database_path, database)
-                raise
-            except KeyboardInterrupt:
-                print(f"\n  interrupted during OCR — clip not saved.", file=sys.stderr)
-                interrupted = True
-                break
-            except Exception as error:
-                _record_ocr_failure(record, error, settings)
-                failed += 1
-                print(f"  failed: {error}", file=sys.stderr)
-            else:
-                _record_ocr_success(record, result, settings)
-                _record_resolution(record, config, users)
-                analyzed += 1
-                resolved += 1
-                obs_count = len(result.get("observations", []))
-                samples = result.get("decoded_sample_count", 0)
-                print(f"  done: {obs_count} text observations from {samples} frames")
-
-            if ocr_index % arguments.checkpoint_every == 0:
-                atomic_write_json(database_path, database)
-
-        if not interrupted:
-            for resolve_index, (key, record) in enumerate(resolution_work, start=1):
-                print(f"[{resolve_index}/{len(resolution_work)}] Resolve {record['path']}")
-                _record_resolution(record, config, users)
-                resolved += 1
-                print(f"  done: resolution refreshed")
-
-                if resolve_index % arguments.checkpoint_every == 0:
-                    atomic_write_json(database_path, database)
-    except KeyboardInterrupt:
-        interrupted = True
-        print("\nInterrupted.", file=sys.stderr)
-
-    atomic_write_json(database_path, database)
-    device = engine.metadata["device"] if engine is not None else "not needed"
-    if interrupted:
-        print(
-            f"Saved progress. OCR analyzed {analyzed}; failed {failed}; "
-            f"resolution refreshed {resolved}; device {device}."
+        summary = synchronize_catalog(conn, medal_root)
+        config, users = load_friends_config(friends_path)
+        settings = OcrSettings(
+            sample_interval_seconds=arguments.sample_interval,
+            maximum_samples=arguments.max_samples,
         )
-        return 130
-    print(
-        f"Done. OCR analyzed {analyzed}; failed {failed}; resolution refreshed {resolved}; device {device}."
-    )
-    return 1 if failed else 0
+        resolution_hash = resolution_settings_hash(config, users)
+        selected = source_records(conn, arguments.game)
+        if arguments.limit is not None:
+            selected = selected[: arguments.limit]
+
+        ocr_work = [
+            (key, record)
+            for key, record in selected
+            if arguments.force or not _current_ocr(record, settings)
+        ]
+        resolution_work = [
+            (key, record)
+            for key, record in selected
+            if not (arguments.force or not _current_ocr(record, settings))
+            and _needs_resolution(record, resolution_hash)
+        ]
+        print(
+            f"Selected source clips: {len(selected)}. "
+            f"OCR current: {len(selected) - len(ocr_work)}. "
+            f"OCR planned: {len(ocr_work)}. "
+            f"Resolution refresh: {len(resolution_work)}."
+        )
+        if arguments.dry_run:
+            conn.rollback()
+            return 0
+        if not users and ocr_work and not arguments.collect_raw_text:
+            conn.commit()
+            print(
+                f"No known users in {friends_path.name}. Add mappings first, or rerun with --collect-raw-text.",
+                file=sys.stderr,
+            )
+            return 2
+
+        conn.commit()
+        engine: OcrEngine | None = None
+        analyzed = 0
+        failed = 0
+        resolved = 0
+        interrupted = False
+        try:
+            for ocr_index, (key, record) in enumerate(ocr_work, start=1):
+                source_path = medal_root / Path(record["path"])
+                print(f"[{ocr_index}/{len(ocr_work)}] OCR {record['path']}")
+                if engine is None:
+                    engine = OcrEngine(workspace, force_cpu=arguments.cpu)
+                try:
+                    def match_found(new_obs: list[dict[str, Any]]) -> bool:
+                        return has_any_match(new_obs, config, users)
+
+                    result = engine.analyze_video(source_path, settings, match_found)
+                except OcrSetupError:
+                    conn.commit()
+                    raise
+                except KeyboardInterrupt:
+                    print(f"\n  interrupted during OCR — clip not saved.", file=sys.stderr)
+                    interrupted = True
+                    break
+                except Exception as error:
+                    _record_ocr_failure(record, error, settings)
+                    failed += 1
+                    print(f"  failed: {error}", file=sys.stderr)
+                else:
+                    _record_ocr_success(record, result, settings)
+                    _record_resolution(record, config, users)
+                    analyzed += 1
+                    resolved += 1
+                    obs_count = len(result.get("observations", []))
+                    samples = result.get("decoded_sample_count", 0)
+                    print(f"  done: {obs_count} text observations from {samples} frames")
+
+                conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (key, json.dumps(record)))
+                if ocr_index % arguments.checkpoint_every == 0:
+                    conn.commit()
+
+            if not interrupted:
+                for resolve_index, (key, record) in enumerate(resolution_work, start=1):
+                    print(f"[{resolve_index}/{len(resolution_work)}] Resolve {record['path']}")
+                    _record_resolution(record, config, users)
+                    resolved += 1
+                    print(f"  done: resolution refreshed")
+                    conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (key, json.dumps(record)))
+                    if resolve_index % arguments.checkpoint_every == 0:
+                        conn.commit()
+        except KeyboardInterrupt:
+            interrupted = True
+            print("\nInterrupted.", file=sys.stderr)
+
+        conn.commit()
+        device = engine.metadata["device"] if engine is not None else "not needed"
+        if interrupted:
+            print(
+                f"Saved progress. OCR analyzed {analyzed}; failed {failed}; "
+                f"resolution refreshed {resolved}; device {device}."
+            )
+            return 130
+        print(
+            f"Done. OCR analyzed {analyzed}; failed {failed}; resolution refreshed {resolved}; device {device}."
+        )
+        return 1 if failed else 0
+    finally:
+        conn.close()
 
 
 def _run_report(arguments: argparse.Namespace) -> int:
     _, database_path, _ = _paths(arguments.workspace)
     if not database_path.exists():
         raise FileNotFoundError(f"Missing local database: {database_path}. Run init, then usernames.")
-    database = load_database(database_path, DEFAULT_MEDAL_ROOT)
-    grouped: dict[str, list[tuple[str, list[str]]]] = {}
-    matched_source_count = 0
-    for _, record in source_records(database, arguments.game):
-        usernames = record.get("analysis", {}).get("usernames", {})
-        resolution = usernames.get("resolution", {}) if isinstance(usernames, dict) else {}
-        matches = resolution.get("usernames", []) if isinstance(resolution, dict) else []
-        if not isinstance(matches, list) or not matches:
-            continue
-        matched_source_count += 1
-        by_group: dict[str, list[str]] = {}
-        for match in matches:
-            if not isinstance(match, dict) or not isinstance(match.get("name"), str):
+    conn = sqlite3.connect(database_path)
+    try:
+        grouped: dict[str, list[tuple[str, list[str]]]] = {}
+        matched_source_count = 0
+        for _, record in source_records(conn, arguments.game):
+            usernames = record.get("analysis", {}).get("usernames", {})
+            resolution = usernames.get("resolution", {}) if isinstance(usernames, dict) else {}
+            matches = resolution.get("usernames", []) if isinstance(resolution, dict) else []
+            if not isinstance(matches, list) or not matches:
                 continue
-            group = match.get("group") if isinstance(match.get("group"), str) else "(ungrouped)"
-            by_group.setdefault(group, []).append(match["name"])
-        for group, names in by_group.items():
-            grouped.setdefault(group, []).append((record["path"], sorted(names, key=str.casefold)))
+            matched_source_count += 1
+            by_group: dict[str, list[str]] = {}
+            for match in matches:
+                if not isinstance(match, dict) or not isinstance(match.get("name"), str):
+                    continue
+                group = match.get("group") if isinstance(match.get("group"), str) else "(ungrouped)"
+                by_group.setdefault(group, []).append(match["name"])
+            for group, names in by_group.items():
+                grouped.setdefault(group, []).append((record["path"], sorted(names, key=str.casefold)))
 
-    if not grouped:
-        print("No matched usernames in selected source clips.")
+        if not grouped:
+            print("No matched usernames in selected source clips.")
+            return 0
+        print(f"Matched source clips: {matched_source_count}")
+        for group in sorted(grouped, key=str.casefold):
+            print(f"\n[{group}]")
+            for path, names in sorted(grouped[group], key=lambda item: item[0].casefold()):
+                print(f"{path} :: {', '.join(names)}")
         return 0
-    print(f"Matched source clips: {matched_source_count}")
-    for group in sorted(grouped, key=str.casefold):
-        print(f"\n[{group}]")
-        for path, names in sorted(grouped[group], key=lambda item: item[0].casefold()):
-            print(f"{path} :: {', '.join(names)}")
-    return 0
+    finally:
+        conn.close()
 
 
 def main(argv: list[str] | None = None) -> int:

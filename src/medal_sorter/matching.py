@@ -26,7 +26,6 @@ def default_friends_config() -> dict[str, Any]:
         "schema_version": 1,
         "ignored_ocr_text": [],
         "matching": {
-            "minimum_ocr_confidence": 0.35,
             "fuzzy_threshold": 90,
         },
         "groups": {},
@@ -167,7 +166,6 @@ def resolution_settings_hash(config: dict[str, Any], users: list[KnownUser]) -> 
             {"name": user.name, "group": user.group, "aliases": list(user.aliases)} for user in users
         ],
         "ignored_ocr_text": config.get("ignored_ocr_text", []),
-        "minimum_ocr_confidence": matching.get("minimum_ocr_confidence", 0.35),
         "fuzzy_threshold": matching.get("fuzzy_threshold", 90),
     }
     return json_hash(value)
@@ -208,7 +206,6 @@ def _best_match_score(observed_text: str, target: str) -> float:
 def has_any_match(
     observations: list[dict[str, Any]], config: dict[str, Any], users: list[KnownUser]
 ) -> bool:
-    minimum_ocr_confidence = _config_number(config, "minimum_ocr_confidence", 0.35)
     fuzzy_threshold = _config_number(config, "fuzzy_threshold", 90) / 100.0
 
     ignored = {
@@ -222,7 +219,7 @@ def has_any_match(
         confidence = observation.get("confidence")
         if not isinstance(text, str) or not isinstance(confidence, (int, float)):
             continue
-        if confidence < minimum_ocr_confidence or normalize(text) in ignored:
+        if normalize(text) in ignored:
             continue
 
         for user in users:
@@ -236,10 +233,7 @@ def has_any_match(
 def resolve_observations(
     observations: list[dict[str, Any]], config: dict[str, Any], users: list[KnownUser]
 ) -> dict[str, Any]:
-    minimum_ocr_confidence = _config_number(config, "minimum_ocr_confidence", 0.35)
     fuzzy_threshold = _config_number(config, "fuzzy_threshold", 90) / 100.0
-    if not 0 <= minimum_ocr_confidence <= 1:
-        raise ValueError("matching.minimum_ocr_confidence must be from 0 through 1.")
     if not 0 <= fuzzy_threshold <= 1:
         raise ValueError("matching.fuzzy_threshold must be from 0 through 100.")
 
@@ -255,7 +249,7 @@ def resolve_observations(
         confidence = observation.get("confidence")
         if not isinstance(text, str) or not isinstance(confidence, (int, float)):
             continue
-        if confidence < minimum_ocr_confidence or normalize(text) in ignored:
+        if normalize(text) in ignored:
             continue
 
         for user in users:

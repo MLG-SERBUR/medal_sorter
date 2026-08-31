@@ -25,10 +25,13 @@ def convert():
         # Remove from resolution evidence
         try:
             resolution = record['analysis']['usernames']['resolution']
-            for username, user_data in resolution.items():
+            # resolution has {"usernames": [{"name":..., "evidence": [...]}]}
+            usernames = resolution.get("usernames", []) if isinstance(resolution, dict) else []
+            for user_data in usernames:
                 if isinstance(user_data, dict) and 'evidence' in user_data:
                     for ev in user_data['evidence']:
-                        ev.pop('bounding_box', None)
+                        if isinstance(ev, dict):
+                            ev.pop('bounding_box', None)
         except (KeyError, AttributeError):
             pass
 
@@ -38,6 +41,10 @@ def convert():
     c.execute('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS records (clip_path TEXT PRIMARY KEY, data TEXT)')
 
+    if 'schema_version' in data:
+        c.execute('INSERT OR REPLACE INTO metadata VALUES (?, ?)', ('schema_version', str(data['schema_version'])))
+    else:
+        c.execute('INSERT OR REPLACE INTO metadata VALUES (?, ?)', ('schema_version', '1'))
     if 'last_discovery_at' in data:
         c.execute('INSERT OR REPLACE INTO metadata VALUES (?, ?)', ('last_discovery_at', data['last_discovery_at']))
     if 'medal_root' in data:

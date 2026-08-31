@@ -157,17 +157,117 @@ def _parent_stem(edit_path: Path) -> str | None:
     return edit_path.stem[: marker.start()]
 
 
-def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSummary:
+def _is_sqlite_conn(obj: Any) -> bool:
+    return isinstance(obj, sqlite3.Connection)
+
+
+def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_root: Path) -> CatalogSummary:
     clips_root = medal_root / "Clips"
     edits_root = medal_root / "Edits"
     if not clips_root.is_dir():
         raise FileNotFoundError(f"Missing Medal Clips directory: {clips_root}")
 
-    records = database["records"]
-    database["medal_root"] = str(medal_root.resolve())
+    if _is_sqlite_conn(database):
+        conn: sqlite3.Connection = database  # type: ignore
+        conn.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS records (clip_path TEXT PRIMARY KEY, data TEXT)")
+        cur = conn.cursor()
+        cur.execute("SELECT clip_path, data FROM records")
+        records: dict[str, dict[str, Any]] = {}
+        for clip_path, data in cur.fetchall():
+            try:
+                records[clip_path] = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+        for rec in records.values():
+            if isinstance(rec, dict) and rec.get("kind") in {"source", "edit", "ignored"}:
+                rec["present"] = False
 
-    # Retain records for files Medal no longer has, but never send those stale
-    # records back through OCR on a later run.
+        source_paths = _videos_in(clips_root)
+        source_stems: dict[str, list[str]] = {}
+        current_sources: dict[str, dict[str, Any]] = {}
+        ignored_count = 0
+
+        for path in source_paths:
+            ignored_reason = _is_ignored(path)
+            key = relative_key(path, medal_root)
+            existing = records.get(key)
+            if ignored_reason is not None:
+                ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, ignored_reason)
+                ig_record["present"] = True
+                records[ig_key] = ig_record
+                ignored_count += 1
+                continue
+            s_key, s_record = _ensure_source_record(existing, path, medal_root)
+            s_record["present"] = True
+            s_record["links"]["edits"] = []
+            records[s_key] = s_record
+            current_sources[s_key] = s_record
+            source_stems.setdefault(path.stem.casefold(), []).append(s_key)
+
+        linked = 0
+        unresolved = 0
+        edit_paths = _videos_in(edits_root)
+        actual_edits = 0
+        for path in edit_paths:
+            ignored_reason = _is_ignored(path)
+            key = relative_key(path, medal_root)
+            existing = records.get(key)
+            if ignored_reason is not None:
+                ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, ignored_reason)
+                ig_record["present"] = True
+                records[ig_key] = ig_record
+                ignored_count += 1
+                continue
+            actual_edits += 1
+            e_key, e_record = _ensure_edit_record(existing, path, medal_root)
+            e_record["present"] = True
+            parent_stem = _parent_stem(path)
+            candidates = source_stems.get(parent_stem.casefold(), []) if parent_stem else []
+            if len(candidates) == 1:
+                source_key = candidates[0]
+                e_record["source"] = {
+                    "state": "linked",
+                    "record_key": source_key,
+                    "method": "filename_marker_exact",
+                }
+                e_record["analysis"]["usernames"] = {
+                    "state": "inherited",
+                    "from": source_key,
+                }
+                current_sources[source_key]["links"]["edits"].append(e_key)
+                linked += 1
+            else:
+                e_record["source"] = {
+                    "state": "unresolved",
+                    "candidate_stem": parent_stem,
+                    "candidates": candidates,
+                }
+                e_record["analysis"]["usernames"] = {"state": "unresolved"}
+                unresolved += 1
+            records[e_key] = e_record
+
+        for src in current_sources.values():
+            src["links"]["edits"].sort()
+
+        now = utc_now()
+        conn.execute("INSERT OR REPLACE INTO metadata VALUES (?, ?)", ("medal_root", str(medal_root.resolve())))
+        conn.execute("INSERT OR REPLACE INTO metadata VALUES (?, ?)", ("last_discovery_at", now))
+        for clip_path, rec in records.items():
+            conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (clip_path, json.dumps(rec)))
+        # commit handled by caller (cli) so dry-run can rollback
+        return CatalogSummary(
+            source_count=len(current_sources),
+            edit_count=actual_edits,
+            ignored_count=ignored_count,
+            linked_edit_count=linked,
+            unresolved_edit_count=unresolved,
+        )
+
+    # legacy dict path (for tests)
+    records = database["records"]  # type: ignore
+    database["medal_root"] = str(medal_root.resolve())  # type: ignore
+
     for record in records.values():
         if isinstance(record, dict) and record.get("kind") in {"source", "edit", "ignored"}:
             record["present"] = False
@@ -179,17 +279,20 @@ def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSu
 
     for path in source_paths:
         ignored_reason = _is_ignored(path)
+        key = relative_key(path, medal_root)
+        existing = records.get(key)
         if ignored_reason is not None:
-            ig_key, ig_record = _ensure_ignored_record(records, path, medal_root, ignored_reason)
+            ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, ignored_reason)
             ig_record["present"] = True
+            records[ig_key] = ig_record
             ignored_count += 1
             continue
-
-        key, record = _ensure_source_record(records, path, medal_root)
-        record["present"] = True
-        record["links"]["edits"] = []
-        current_sources[key] = record
-        source_stems.setdefault(path.stem.casefold(), []).append(key)
+        s_key, s_record = _ensure_source_record(existing, path, medal_root)
+        s_record["present"] = True
+        s_record["links"]["edits"] = []
+        records[s_key] = s_record
+        current_sources[s_key] = s_record
+        source_stems.setdefault(path.stem.casefold(), []).append(s_key)
 
     linked = 0
     unresolved = 0
@@ -197,44 +300,46 @@ def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSu
     actual_edits = 0
     for path in edit_paths:
         ignored_reason = _is_ignored(path)
+        key = relative_key(path, medal_root)
+        existing = records.get(key)
         if ignored_reason is not None:
-            ig_key, ig_record = _ensure_ignored_record(records, path, medal_root, ignored_reason)
+            ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, ignored_reason)
             ig_record["present"] = True
+            records[ig_key] = ig_record
             ignored_count += 1
             continue
-
         actual_edits += 1
-        edit_key, edit_record = _ensure_edit_record(records, path, medal_root)
-        edit_record["present"] = True
+        e_key, e_record = _ensure_edit_record(existing, path, medal_root)
+        e_record["present"] = True
         parent_stem = _parent_stem(path)
         candidates = source_stems.get(parent_stem.casefold(), []) if parent_stem else []
-
         if len(candidates) == 1:
             source_key = candidates[0]
-            edit_record["source"] = {
+            e_record["source"] = {
                 "state": "linked",
                 "record_key": source_key,
                 "method": "filename_marker_exact",
             }
-            edit_record["analysis"]["usernames"] = {
+            e_record["analysis"]["usernames"] = {
                 "state": "inherited",
                 "from": source_key,
             }
-            current_sources[source_key]["links"]["edits"].append(edit_key)
+            current_sources[source_key]["links"]["edits"].append(e_key)
             linked += 1
         else:
-            edit_record["source"] = {
+            e_record["source"] = {
                 "state": "unresolved",
                 "candidate_stem": parent_stem,
                 "candidates": candidates,
             }
-            edit_record["analysis"]["usernames"] = {"state": "unresolved"}
+            e_record["analysis"]["usernames"] = {"state": "unresolved"}
             unresolved += 1
+        records[e_key] = e_record
 
     for source_record in current_sources.values():
         source_record["links"]["edits"].sort()
 
-    database["last_discovery_at"] = utc_now()
+    database["last_discovery_at"] = utc_now()  # type: ignore
     return CatalogSummary(
         source_count=len(current_sources),
         edit_count=actual_edits,
@@ -245,11 +350,31 @@ def synchronize_catalog(database: dict[str, Any], medal_root: Path) -> CatalogSu
 
 
 def source_records(
-    database: dict[str, Any], game: str | None = None
+    database: dict[str, Any] | sqlite3.Connection, game: str | None = None
 ) -> list[tuple[str, dict[str, Any]]]:
     selected: list[tuple[str, dict[str, Any]]] = []
     wanted_game = game.casefold() if game else None
-    for key, record in database["records"].items():
+    if _is_sqlite_conn(database):
+        conn: sqlite3.Connection = database  # type: ignore
+        cur = conn.cursor()
+        cur.execute("SELECT clip_path, data FROM records")
+        for clip_path, data in cur.fetchall():
+            try:
+                record = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict) or record.get("kind") != "source":
+                continue
+            if not record.get("present", True):
+                continue
+            path = str(record.get("path", ""))
+            parts = path.split("/")
+            if wanted_game and (len(parts) < 3 or parts[1].casefold() != wanted_game):
+                continue
+            selected.append((clip_path, record))
+        return sorted(selected, key=lambda item: item[0])
+
+    for key, record in database["records"].items():  # type: ignore
         if not isinstance(record, dict) or record.get("kind") != "source":
             continue
         if not record.get("present", True):
