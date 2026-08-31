@@ -166,6 +166,7 @@ def resolution_settings_hash(config: dict[str, Any], users: list[KnownUser]) -> 
             {"name": user.name, "group": user.group, "aliases": list(user.aliases)} for user in users
         ],
         "ignored_ocr_text": config.get("ignored_ocr_text", []),
+        "minimum_ocr_confidence": matching.get("minimum_ocr_confidence", 0.35),
         "fuzzy_threshold": matching.get("fuzzy_threshold", 90),
     }
     return json_hash(value)

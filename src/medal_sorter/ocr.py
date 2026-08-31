@@ -25,10 +25,7 @@ class OcrSettings:
     minimum_saved_confidence: float = 0.25  # deprecated, ignored - kept for compat
 
     def fingerprint(self) -> str:
-        # exclude deprecated field so old low-confidence filtering does not affect hash
-        d = asdict(self)
-        d.pop("minimum_saved_confidence", None)
-        return json_hash({"revision": PIPELINE_REVISION, **d})
+        return json_hash({"revision": PIPELINE_REVISION, **asdict(self)})
 
 
 def sampling_timestamps(duration_seconds: float, interval_seconds: float, maximum_samples: int) -> list[float]:
