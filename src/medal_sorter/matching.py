@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from rapidfuzz.fuzz import ratio
+from rapidfuzz.distance import Levenshtein
 
 from .store import json_hash, utc_now
 
@@ -179,28 +179,44 @@ def _config_number(config: dict[str, Any], name: str, default: float) -> float:
     return float(value)
 
 
-def _candidate_strings(text: str) -> set[str]:
-    tokens = [normalize(token) for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)]
-    tokens = [token for token in tokens if token]
-    candidates = {normalize(text)} if normalize(text) else set()
-    for index in range(len(tokens)):
-        for width in range(1, min(4, len(tokens) - index) + 1):
-            candidates.add("".join(tokens[index : index + width]))
-    return candidates
-
-
 def _best_match_score(observed_text: str, target: str) -> float:
+    """Fast fuzzy match between observed OCR text and a target username/alias.
+    
+    Uses exact matching for short names and normalized Levenshtein distance for longer ones.
+    """
     normalized_target = normalize(target)
     if not normalized_target:
         return 0.0
-    scores: list[float] = []
-    for candidate in _candidate_strings(observed_text):
-        if candidate == normalized_target:
+    
+    normalized_obs = normalize(observed_text)
+    if normalized_obs == normalized_target:
+        return 1.0
+    
+    # For short targets (<=4 chars), only exact match counts
+    if len(normalized_target) <= 4:
+        return 0.0
+    
+    # Try the full normalized text first (best case)
+    if normalized_obs:
+        score = Levenshtein.normalized_similarity(normalized_obs, normalized_target)
+        if score == 1.0:
             return 1.0
-        if len(normalized_target) <= 4:
-            continue
-        scores.append(ratio(candidate, normalized_target) / 100.0)
-    return max(scores, default=0.0)
+    
+    # For longer targets, also try substring/token matches
+    tokens = [normalize(token) for token in re.findall(r"[^\W_]+", observed_text, flags=re.UNICODE)]
+    tokens = [token for token in tokens if token]
+    
+    max_score = 0.0
+    for index in range(len(tokens)):
+        for width in range(1, min(4, len(tokens) - index) + 1):
+            candidate = "".join(tokens[index : index + width])
+            if candidate == normalized_target:
+                return 1.0
+            score = Levenshtein.normalized_similarity(candidate, normalized_target)
+            if score > max_score:
+                max_score = score
+    
+    return max_score
 
 
 def has_any_match(
@@ -224,8 +240,9 @@ def has_any_match(
 
         for user in users:
             aliases = (user.name, *user.aliases)
-            best_alias = max(aliases, key=lambda alias: _best_match_score(text, alias))
-            if _best_match_score(text, best_alias) >= fuzzy_threshold:
+            # Find best match score across all aliases
+            best_score = max((_best_match_score(text, alias) for alias in aliases), default=0.0)
+            if best_score >= fuzzy_threshold:
                 return True
     return False
 
@@ -254,8 +271,10 @@ def resolve_observations(
 
         for user in users:
             aliases = (user.name, *user.aliases)
-            best_alias = max(aliases, key=lambda alias: _best_match_score(text, alias))
-            score = _best_match_score(text, best_alias)
+            # Calculate scores for all aliases at once
+            alias_scores = [(alias, _best_match_score(text, alias)) for alias in aliases]
+            best_alias, score = max(alias_scores, key=lambda x: x[1])
+            
             if score < fuzzy_threshold:
                 continue
 

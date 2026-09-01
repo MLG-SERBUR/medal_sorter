@@ -188,3 +188,4 @@ cython_debug/
 .cursorindexingignore
 friends.yaml
 clip_data.sqlite
+clip_data.sqlite-journal
