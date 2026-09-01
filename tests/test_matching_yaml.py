@@ -15,7 +15,7 @@ schema_version: 1
 ignored_ocr_text:
   - Play
 matching:
-  minimum_ocr_confidence: 0.35
+
   fuzzy_threshold: 90
 
 ar:

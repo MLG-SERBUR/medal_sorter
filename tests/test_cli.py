@@ -15,7 +15,7 @@ class CliTests(unittest.TestCase):
         }
         settings = OcrSettings()
         users = [KnownUser(name="Alex Display", group=None, aliases=())]
-        config = {"matching": {"minimum_ocr_confidence": 0.35, "fuzzy_threshold": 90}}
+        config = {"matching": {"fuzzy_threshold": 90}}
         resolution_hash = resolution_settings_hash(config, users)
 
         ocr_result = {

@@ -31,7 +31,6 @@ ignored_ocr_text:
   - Settings
   - Headshot
 matching:
-  minimum_ocr_confidence: 0.35
   fuzzy_threshold: 90
 
 friday_friends:

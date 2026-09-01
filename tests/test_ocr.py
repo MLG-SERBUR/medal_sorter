@@ -76,7 +76,7 @@ class OcrTests(unittest.TestCase):
 
         settings = OcrSettings(sample_interval_seconds=2.0, maximum_samples=3, minimum_saved_confidence=0.25)
         users = [KnownUser(name="Alex Display", group=None, aliases=())]
-        config = {"matching": {"minimum_ocr_confidence": 0.35, "fuzzy_threshold": 90}}
+        config = {"matching": {"fuzzy_threshold": 90}}
 
         def match_found(frame_observations: list[dict[str, Any]]) -> bool:
             return has_any_match(frame_observations, config, users)
@@ -120,7 +120,7 @@ class OcrTests(unittest.TestCase):
 
         settings = OcrSettings(sample_interval_seconds=4.0, maximum_samples=8, minimum_saved_confidence=0.25)
         users = [KnownUser(name="Alex Display", group=None, aliases=())]
-        config = {"matching": {"minimum_ocr_confidence": 0.35, "fuzzy_threshold": 90}}
+        config = {"matching": {"fuzzy_threshold": 90}}
 
         def match_found(frame_observations: list[dict[str, Any]]) -> bool:
             return has_any_match(frame_observations, config, users)
