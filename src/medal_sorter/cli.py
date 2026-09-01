@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -153,6 +154,52 @@ def _record_resolution(record: dict[str, Any], config: dict[str, Any], users: li
     record["analysis"]["usernames"]["resolution"] = resolution
 
 
+def _worker_resolve_observation(
+    args: tuple[str, dict[str, Any], dict[str, Any], list[KnownUser]]
+) -> tuple[str, dict[str, Any]]:
+    """Worker function for resolution refresh.
+    
+    Takes (key, record, config, users).
+    Returns (key, updated_record).
+    """
+    key, record, config, users = args
+    record_copy = record.copy()
+    _record_resolution(record_copy, config, users)
+    return key, record_copy
+
+
+def _resolve_observations_batch(
+    resolution_work: list[tuple[str, dict[str, Any]]],
+    config: dict[str, Any],
+    users: list[KnownUser],
+) -> list[tuple[str, dict[str, Any]]]:
+    """Batch process resolution observations efficiently.
+    
+    Note: Resolution refresh is CPU-bound fuzzy matching. Due to Python's GIL,
+    threading doesn't help, and multiprocessing overhead exceeds benefits for
+    typical workloads. Sequential processing with fast algorithms (like our
+    optimized Levenshtein matching) is most efficient.
+    
+    Args:
+        resolution_work: List of (key, record) tuples to process
+        config: Friend configuration dict
+        users: List of KnownUser objects
+    
+    Returns:
+        List of (key, updated_record) tuples in original order
+    """
+    if not resolution_work:
+        return []
+    
+    results: list[tuple[str, dict[str, Any]]] = []
+    for key, record in resolution_work:
+        record_copy = record.copy()
+        _record_resolution(record_copy, config, users)
+        results.append((key, record_copy))
+    
+    return results
+
+
 def _summary_line(summary: CatalogSummary) -> str:
     parts = [
         f"Discovered {summary.source_count} source MP4s, {summary.edit_count} edits",
@@ -263,14 +310,20 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
                     conn.commit()
 
             if not interrupted:
-                for resolve_index, (key, record) in enumerate(resolution_work, start=1):
-                    print(f"[{resolve_index}/{len(resolution_work)}] Resolve {record['path']}")
-                    _record_resolution(record, config, users)
-                    resolved += 1
-                    print(f"  done: resolution refreshed")
-                    conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (key, json.dumps(record)))
-                    if resolve_index % arguments.checkpoint_every == 0:
-                        conn.commit()
+                if resolution_work:
+                    # Process all resolutions using optimized serial algorithm
+                    resolved_work = _resolve_observations_batch(resolution_work, config, users)
+                    
+                    for resolve_index, (key, record) in enumerate(resolved_work, start=1):
+                        print(f"[{resolve_index}/{len(resolution_work)}] Resolve {record['path']}")
+                        resolved += 1
+                        conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (key, json.dumps(record)))
+                        print(f"  done: resolution refreshed")
+                        if resolve_index % arguments.checkpoint_every == 0:
+                            conn.commit()
+                    
+                    # Final commit for any remaining records
+                    conn.commit()
         except KeyboardInterrupt:
             interrupted = True
             print("\nInterrupted.", file=sys.stderr)
