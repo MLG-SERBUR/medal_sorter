@@ -161,11 +161,29 @@ def _is_sqlite_conn(obj: Any) -> bool:
     return isinstance(obj, sqlite3.Connection)
 
 
-def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_root: Path) -> CatalogSummary:
+def _game_name_from_path(path: Path, medal_root: Path) -> str | None:
+    """Extract game folder name from a clip path relative to medal_root/Clips/ or Edits/."""
+    try:
+        rel = path.resolve().relative_to(medal_root.resolve())
+    except ValueError:
+        return None
+    parts = rel.parts  # e.g. ("Clips", "GameName", "clip.mp4")
+    if len(parts) >= 3:
+        return parts[1]
+    return None
+
+
+def synchronize_catalog(
+    database: dict[str, Any] | sqlite3.Connection,
+    medal_root: Path,
+    ignored_games: list[str] | None = None,
+) -> CatalogSummary:
     clips_root = medal_root / "Clips"
     edits_root = medal_root / "Edits"
     if not clips_root.is_dir():
         raise FileNotFoundError(f"Missing Medal Clips directory: {clips_root}")
+
+    ignored_games_set: set[str] = {g.casefold() for g in (ignored_games or [])}
 
     if _is_sqlite_conn(database):
         conn: sqlite3.Connection = database  # type: ignore
@@ -189,6 +207,15 @@ def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_roo
         ignored_count = 0
 
         for path in source_paths:
+            game = _game_name_from_path(path, medal_root)
+            if game and game.casefold() in ignored_games_set:
+                key = relative_key(path, medal_root)
+                existing = records.get(key)
+                ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, "ignored_game")
+                ig_record["present"] = True
+                records[ig_key] = ig_record
+                ignored_count += 1
+                continue
             ignored_reason = _is_ignored(path)
             key = relative_key(path, medal_root)
             existing = records.get(key)
@@ -210,6 +237,15 @@ def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_roo
         edit_paths = _videos_in(edits_root)
         actual_edits = 0
         for path in edit_paths:
+            game = _game_name_from_path(path, medal_root)
+            if game and game.casefold() in ignored_games_set:
+                key = relative_key(path, medal_root)
+                existing = records.get(key)
+                ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, "ignored_game")
+                ig_record["present"] = True
+                records[ig_key] = ig_record
+                ignored_count += 1
+                continue
             ignored_reason = _is_ignored(path)
             key = relative_key(path, medal_root)
             existing = records.get(key)
@@ -278,6 +314,15 @@ def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_roo
     ignored_count = 0
 
     for path in source_paths:
+        game = _game_name_from_path(path, medal_root)
+        if game and game.casefold() in ignored_games_set:
+            key = relative_key(path, medal_root)
+            existing = records.get(key)
+            ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, "ignored_game")
+            ig_record["present"] = True
+            records[ig_key] = ig_record
+            ignored_count += 1
+            continue
         ignored_reason = _is_ignored(path)
         key = relative_key(path, medal_root)
         existing = records.get(key)
@@ -299,6 +344,15 @@ def synchronize_catalog(database: dict[str, Any] | sqlite3.Connection, medal_roo
     edit_paths = _videos_in(edits_root)
     actual_edits = 0
     for path in edit_paths:
+        game = _game_name_from_path(path, medal_root)
+        if game and game.casefold() in ignored_games_set:
+            key = relative_key(path, medal_root)
+            existing = records.get(key)
+            ig_key, ig_record = _ensure_ignored_record(existing, path, medal_root, "ignored_game")
+            ig_record["present"] = True
+            records[ig_key] = ig_record
+            ignored_count += 1
+            continue
         ignored_reason = _is_ignored(path)
         key = relative_key(path, medal_root)
         existing = records.get(key)

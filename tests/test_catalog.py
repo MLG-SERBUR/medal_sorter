@@ -73,3 +73,38 @@ class CatalogTests(unittest.TestCase):
             discord_track = database["records"]["clips/marvel rivals/clipabc_discord.mp4"]
             self.assertEqual(discord_track["kind"], "ignored")
             self.assertEqual(discord_track["reason"], "medal_editor_audio_export")
+
+    def test_ignored_games_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for game in ("Overwatch", "Minecraft", "Fortnite"):
+                d = root / "Clips" / game
+                d.mkdir(parents=True)
+                (d / "clip1.mp4").touch()
+            edits = root / "Edits" / "Minecraft"
+            edits.mkdir(parents=True)
+            (edits / "clip1--edit.mp4").touch()
+
+            database = new_database(root)
+            summary = synchronize_catalog(database, root, ignored_games=["Minecraft", "Fortnite"])
+
+            # Only Overwatch should be a source
+            self.assertEqual(summary.source_count, 1)
+            # Minecraft clip + Fortnite clip + Minecraft edit = 3 ignored
+            self.assertEqual(summary.ignored_count, 3)
+            mc_clip = database["records"]["clips/minecraft/clip1.mp4"]
+            self.assertEqual(mc_clip["kind"], "ignored")
+            self.assertEqual(mc_clip["reason"], "ignored_game")
+
+    def test_ignored_games_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            d = root / "Clips" / "MINECRAFT"
+            d.mkdir(parents=True)
+            (d / "clip1.mp4").touch()
+
+            database = new_database(root)
+            summary = synchronize_catalog(database, root, ignored_games=["minecraft"])
+
+            self.assertEqual(summary.source_count, 0)
+            self.assertEqual(summary.ignored_count, 1)

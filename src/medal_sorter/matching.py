@@ -25,6 +25,7 @@ def default_friends_config() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "ignored_ocr_text": [],
+        "ignored_games": [],
         "matching": {
             "fuzzy_threshold": 90,
         },
@@ -45,6 +46,11 @@ def load_friends_config(path: Path) -> tuple[dict[str, Any], list[KnownUser]]:
         config = {**config, "users": raw_users}
     if not isinstance(raw_users, list):
         raise ValueError("Friend config users must be an array.")
+
+    ignored_games = config.get("ignored_games", [])
+    if not isinstance(ignored_games, list) or not all(isinstance(g, str) for g in ignored_games):
+        raise ValueError("ignored_games must be an array of strings.")
+    config.setdefault("ignored_games", [])
 
     users: list[KnownUser] = []
     names_seen: set[str] = set()
@@ -89,7 +95,7 @@ def _load_friends_config(path: Path) -> Any:
 
 
 def _users_from_group_sections(config: dict[str, Any]) -> list[dict[str, Any]]:
-    known_keys = {"schema_version", "users", "groups", "ignored_ocr_text", "matching", "example_user"}
+    known_keys = {"schema_version", "users", "groups", "ignored_ocr_text", "ignored_games", "matching", "example_user"}
     groups = config.get("groups")
     if groups is None:
         groups = {key: value for key, value in config.items() if key not in known_keys}

@@ -229,8 +229,11 @@ def _run_usernames(arguments: argparse.Namespace) -> int:
 
     conn = get_db(database_path, medal_root)
     try:
-        summary = synchronize_catalog(conn, medal_root)
         config, users = load_friends_config(friends_path)
+        ignored_games = config.get("ignored_games", [])
+        if ignored_games:
+            print(f"Ignoring games: {', '.join(ignored_games)}")
+        summary = synchronize_catalog(conn, medal_root, ignored_games=ignored_games)
         settings = OcrSettings(
             sample_interval_seconds=arguments.sample_interval,
             maximum_samples=arguments.max_samples,
