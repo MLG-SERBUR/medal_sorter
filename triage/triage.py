@@ -278,9 +278,14 @@ h2{margin-bottom:12px;font-size:20px}
 #cols{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;background:#111;flex-wrap:nowrap}
 .cbtn{flex:0 0 auto;border:2px solid #444;background:#1c1c1e;color:#fff;border-radius:20px;
   padding:10px 16px;font-size:15px;min-height:48px}
-.cbtn.on{border-color:#30d158;background:#14331f}
+.cbtn.on{border-color:#30d158;background:#30d158;color:#000;font-weight:700}
 .cbtn .tick{color:#30d158;font-weight:700;margin-right:6px;visibility:hidden}
-.cbtn.on .tick{visibility:visible}
+.cbtn.on .tick{visibility:visible;color:#000}
+#toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%) translateY(8px);
+  background:#1c1c1e;border:1px solid #555;color:#fff;padding:10px 20px;border-radius:24px;
+  font-size:15px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+  z-index:99;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #newcol{flex:0 0 auto;border:2px dashed #555;background:transparent;color:#999;border-radius:20px;
   padding:10px 16px;font-size:15px;min-height:48px}
 #actions{display:flex;gap:10px;padding:10px 12px 16px;background:#111}
@@ -315,6 +320,7 @@ h2{margin-bottom:12px;font-size:20px}
       <button class="abtn" id="nextb">&#8594;</button>
     </div>
   </div>
+  <div id="toast"></div>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -338,6 +344,9 @@ async function loadClips(){collections=await api('/api/collections');
     +(showSources?'&show_sources=1':''));
   $('crumb').textContent=game+' / '+group;show('viewer');render();}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+let toastT=null;
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1400);}
 function render(){const c=clips[idx];const v=$('vid');
   if(!c){$('info').innerHTML='<div id="empty">No clips in this view.</div>';v.removeAttribute('src');v.load();
     $('pos').textContent='0 / 0';renderCols(null);return;}
@@ -358,10 +367,14 @@ function renderCols(c){$('cols').innerHTML=collections.map(x=>{
     +'<button id="newcol">+ New</button>';
   $('cols').querySelectorAll('.cbtn').forEach(b=>b.onclick=async()=>{
     const id=+b.dataset.id,on=b.classList.contains('on');const c=clips[idx];if(!c)return;
-    await api('/api/collect',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({key:c.key,collection_id:id,add:!on})});
-    if(on)c.collections=c.collections.filter(i=>i!==id);else c.collections.push(id);
-    renderCols(c);});
+    const name=(collections.find(x=>x.id===id)||{}).name||'collection';
+    try{
+      await api('/api/collect',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key:c.key,collection_id:id,add:!on})});
+      if(on)c.collections=c.collections.filter(i=>i!==id);else c.collections.push(id);
+      renderCols(c);
+      toast((on?'Removed from ':'Added to ')+name);
+    }catch(e){toast('Error: '+e.message);}});
   $('newcol').onclick=async()=>{const n=prompt('Collection name:');if(!n)return;
     try{collections=await api('/api/collections',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name:n})});renderCols(clips[idx]);}
@@ -369,15 +382,20 @@ function renderCols(c){$('cols').innerHTML=collections.map(x=>{
 function step(d){if(!clips.length)return;idx=(idx+d+clips.length)%clips.length;render();}
 $('nextb').onclick=()=>step(1);$('prevb').onclick=()=>step(-1);
 $('discardb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.discard;
-  await api('/api/discard',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({key:c.key,discard:v})});
-  c.discard=v;$('discardb').classList.toggle('on',v);
-  $('discardb').textContent=v?'Marked discard':'Discard';};
+  try{
+    await api('/api/discard',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:c.key,discard:v})});
+    c.discard=v;$('discardb').classList.toggle('on',v);
+    $('discardb').textContent=v?'Marked discard':'Discard';
+    toast(v?'Marked discard':'Discard cleared');
+  }catch(e){toast('Error: '+e.message);}};
 $('keepb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.keep;
-  await api('/api/keep',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({key:c.key,keep:v})});
-  c.keep=v;
-  if(v)step(1);else render();};
+  try{
+    await api('/api/keep',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:c.key,keep:v})});
+    c.keep=v;
+    if(v){toast('Kept');step(1);}else render();
+  }catch(e){toast('Error: '+e.message);}};
 $('backb').onclick=()=>loadGroups();
 $('togsources').onclick=()=>{showSources=!showSources;$('togsources').style.background=showSources?'#0a84ff':'';
   idx=0;loadClips();};
