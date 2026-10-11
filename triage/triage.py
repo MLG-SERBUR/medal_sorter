@@ -325,7 +325,11 @@ h2{margin-bottom:12px;font-size:20px}
 <script>
 const $=id=>document.getElementById(id);
 let game=null,group=null,clips=[],idx=0,collections=[],showSources=false;
-async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json();}
+async function api(p,o,retried){let r;
+  try{r=await fetch(p,o);}catch(e){
+    if(!retried){await new Promise(r=>setTimeout(r,600));return api(p,o,true);}
+    throw new Error('server unreachable - is triage.py still running on the PC?');}
+  if(!r.ok)throw new Error(await r.text());return r.json();}
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   $('viewer').classList.remove('active');
   (id==='viewer'?$('viewer'):$(id)).classList.add('active');}
