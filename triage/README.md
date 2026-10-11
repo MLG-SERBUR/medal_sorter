@@ -18,8 +18,9 @@ works too.
 ## Flow
 
 1. Pick a game, then a friend group (groups narrow to the selected game).
-2. Clips play one at a time, chronological, autoplaying muted on loop.
-   Unmute once via the player controls and the setting sticks for later clips.
+2. Clips play one at a time, chronological, autoplaying with sound on loop
+   when the browser permits autoplay with sound. If the browser blocks it,
+   start playback with the player controls.
 3. File a clip into any of your own collections (toggle buttons, tap again to
    remove), or mark it discard. Discard is mark-only; no files are moved or
    deleted, ever.

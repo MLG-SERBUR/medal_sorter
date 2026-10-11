@@ -12,9 +12,9 @@ file, keyed by medal-sorter's clip key (casefolded relative path).
 
 Then open http://<pc-ip>:8765 on your phone (same LAN, no auth).
 
-Stdlib only. No file operations: discard only marks. Clips autoplay muted on
-loop; unmute once via the player controls and it sticks. Keep marks a clip as
-reviewed so it stops showing up in the queue, advancing to the next clip.
+Stdlib only. No file operations: discard only marks. Clips autoplay with sound
+on loop when the browser allows it. Keep marks a clip as reviewed so it stops
+showing up in the queue, advancing to the next clip.
 """
 from __future__ import annotations
 
@@ -270,15 +270,17 @@ h2{margin-bottom:12px;font-size:20px}
 #viewer.active{display:flex}
 #stage{flex:1;position:relative;min-height:0;background:#000}
 #stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#info{position:absolute;left:0;right:0;bottom:0;padding:10px 12px;
-  background:linear-gradient(transparent,rgba(0,0,0,.85));font-size:13px}
+#info{position:absolute;left:0;right:0;bottom:48px;padding:8px 10px;
+  background:linear-gradient(transparent,rgba(0,0,0,.85));font-size:12px;pointer-events:none}
 #info .friends{color:#ffd60a;font-weight:600}
 #info .meta{color:#aaa}
 .badge{display:inline-block;background:#0a84ff;border-radius:6px;padding:2px 8px;font-size:11px;margin-right:6px}
 .badge.edit{background:#30d158;color:#000}
-#cols{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;background:#111;flex-wrap:nowrap}
+#togsources{position:absolute;top:8px;right:8px;z-index:2;border:0;border-radius:8px;
+  padding:6px 9px;background:rgba(44,44,46,.8);color:#fff;font-size:12px}
+#cols{display:flex;gap:6px;overflow-x:auto;padding:6px 8px;background:#111;flex-wrap:nowrap}
 .cbtn{flex:0 0 auto;border:2px solid #444;background:#1c1c1e;color:#fff;border-radius:20px;
-  padding:10px 16px;font-size:15px;min-height:48px}
+  padding:7px 12px;font-size:14px;min-height:38px}
 .cbtn.on{border-color:#30d158;background:#30d158;color:#000;font-weight:700}
 .cbtn .tick{color:#30d158;font-weight:700;margin-right:6px;visibility:hidden}
 .cbtn.on .tick{visibility:visible;color:#000}
@@ -288,30 +290,23 @@ h2{margin-bottom:12px;font-size:20px}
   z-index:99;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #newcol{flex:0 0 auto;border:2px dashed #555;background:transparent;color:#999;border-radius:20px;
-  padding:10px 16px;font-size:15px;min-height:48px}
-#actions{display:flex;gap:10px;padding:10px 12px 16px;background:#111}
-.abtn{flex:1;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:700;min-height:56px}
+  padding:7px 12px;font-size:14px;min-height:38px}
+#actions{display:flex;gap:6px;padding:6px 8px 8px;background:#111}
+.abtn{flex:1;border:none;border-radius:10px;padding:10px 8px;font-size:14px;font-weight:700;min-height:42px}
 #prevb{background:#2c2c2e;color:#fff}
 #discardb{background:#3a1113;color:#ff453a}
 #discardb.on{background:#ff453a;color:#000}
 #keepb{background:#1c2b1c;color:#30d158}
 #keepb.on{background:#30d158;color:#000}
 #nextb{background:#0a84ff;color:#fff}
-#topbar{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#111;font-size:14px}
-#topbar button{background:#2c2c2e;border:none;color:#fff;border-radius:8px;padding:8px 12px;font-size:14px}
-#pos{margin-left:auto;color:#999}
 #empty{padding:40px 20px;text-align:center;color:#888}
 </style></head><body>
 <div id="app">
   <div id="games" class="screen active"><h2>Games</h2><div id="gamelist"></div></div>
   <div id="groups" class="screen"><h2 id="grouptitle">Groups</h2><div id="grouplist"></div></div>
   <div id="viewer">
-    <div id="topbar">
-      <button id="backb">&#8592; Groups</button>
-      <span id="crumb"></span><span id="pos"></span>
+    <div id="stage"><video id="vid" playsinline controls preload="auto" loop autoplay></video>
       <button id="togsources" title="show raw sources with edits">src</button>
-    </div>
-    <div id="stage"><video id="vid" playsinline controls preload="auto" loop muted></video>
       <div id="info"></div></div>
     <div id="cols"></div>
     <div id="actions">
@@ -347,20 +342,20 @@ async function loadGroups(){const g=await api('/api/groups?game='+encodeURICompo
 async function loadClips(){collections=await api('/api/collections');
   clips=await api('/api/clips?game='+encodeURIComponent(game)+'&group='+encodeURIComponent(group)
     +(showSources?'&show_sources=1':''));
-  $('crumb').textContent=game+' / '+group;show('viewer');render();}
+  show('viewer');render();}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let toastT=null;
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1400);}
 function render(){const c=clips[idx];const v=$('vid');
   if(!c){$('info').innerHTML='<div id="empty">No clips in this view.</div>';v.removeAttribute('src');v.load();
-    $('pos').textContent='0 / 0';renderCols(null);return;}
-  v.src='/video?key='+encodeURIComponent(c.key);v.play().catch(()=>{});
-  $('pos').textContent=(idx+1)+' / '+clips.length;
+    renderCols(null);return;}
+  v.src='/video?key='+encodeURIComponent(c.key);
+  v.play().catch(()=>toast('Autoplay with sound was blocked; tap play to start.'));
   const fr=c.friends.map(f=>esc(f.name)).join(', ')||'no friends detected';
   const d=c.mtime?new Date(c.mtime/1e6).toLocaleDateString():'';
   $('info').innerHTML=`<span class="badge ${c.kind==='edit'?'edit':''}">${c.kind}</span>`+
-    `<span class="friends">${fr}</span><div class="meta">${esc(c.game)} &middot; ${d} &middot; ${(c.size/1048576).toFixed(1)} MB</div>`;
+    `<span class="friends">${fr}</span><div class="meta">${esc(c.game)} &middot; ${d} &middot; ${(c.size/1048576).toFixed(1)} MB &middot; ${idx+1} / ${clips.length}</div>`;
   $('discardb').classList.toggle('on',!!c.discard);
   $('discardb').textContent=c.discard?'Marked discard':'Discard';
   $('keepb').classList.toggle('on',!!c.keep);
@@ -401,7 +396,6 @@ $('keepb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.keep;
     c.keep=v;
     if(v){toast('Kept');step(1);}else render();
   }catch(e){toast('Error: '+e.message);}};
-$('backb').onclick=()=>loadGroups();
 $('togsources').onclick=()=>{showSources=!showSources;$('togsources').style.background=showSources?'#0a84ff':'';
   idx=0;loadClips();};
 document.addEventListener('keydown',e=>{if(!$('viewer').classList.contains('active'))return;
