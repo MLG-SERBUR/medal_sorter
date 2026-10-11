@@ -22,6 +22,7 @@ import argparse
 import html
 import json
 import sqlite3
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -520,7 +521,12 @@ class Handler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     def log_message(self, fmt, *args):
-        pass
+        # Show API calls in the terminal for diagnostics; video chunks would spam.
+        if args and "/video" not in str(args[0]):
+            sys.stderr.write(
+                "%s - %s\n" % (time.strftime("%H:%M:%S"), fmt % args)
+            )
+            sys.stderr.flush()
 
 
 def main() -> int:
