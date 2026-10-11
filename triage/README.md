@@ -8,8 +8,8 @@ same database file.
 ## Run
 
 ```powershell
-cd E:\GitHub\medal_sorter\triage
-python triage.py --workspace <dir with clip_data.sqlite> --medal-root W:\medal
+cd E:\GitHub\medal_sorter
+uv run triage/triage.py --workspace E:\GitHub\medal_sorter --medal-root W:\medal
 ```
 
 Then open `http://<pc-ip>:8765` on your phone (same LAN, no auth). Desktop
