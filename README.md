@@ -113,3 +113,21 @@ Current library check: 936 source MP4s, 135 edit MP4s; 94 edits use a recognizab
 ## Limits of first pass
 
 This pass does not classify clips, trim them, inspect audio, alter Medal metadata, or upload video. It is generic full-frame OCR. Game-specific HUD crops and unknown-name discovery should follow only after the five-clip benchmark shows which game UIs and name formats matter.
+
+## Clip triage UI
+
+A phone-friendly quick-review interface lives in `triage/`. It reads
+`clip_data.sqlite` read-only and stores its own state (collections, discard
+flags) in separate `triage_*` tables, never touching medal-sorter's tables.
+
+```powershell
+cd E:\GitHub\medal_sorter\triage
+python triage.py --workspace <dir with clip_data.sqlite> --medal-root W:\medal
+```
+
+Then open `http://<pc-ip>:8765` on your phone (same LAN, no auth). Pick a
+game, then a friend group, and review clips one at a time chronologically —
+file them into your own collections or mark discard. Discard is mark-only; no
+files are moved or deleted. When a clip has a linked edit, the edit is shown
+and the raw source stays hidden unless toggled. Stdlib only, one file,
+landscape supported.
