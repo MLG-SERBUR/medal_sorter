@@ -12,7 +12,9 @@ file, keyed by medal-sorter's clip key (casefolded relative path).
 
 Then open http://<pc-ip>:8765 on your phone (same LAN, no auth).
 
-Stdlib only. No file operations: discard only marks.
+Stdlib only. No file operations: discard only marks. Clips autoplay muted on
+loop; unmute once via the player controls and it sticks. Keep marks a clip as
+reviewed so it stops showing up in the queue, advancing to the next clip.
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS triage_clip_collections (
 CREATE TABLE IF NOT EXISTS triage_flags (
     clip_key TEXT PRIMARY KEY,
     discard INTEGER NOT NULL DEFAULT 0,
+    keep INTEGER NOT NULL DEFAULT 0,
     rated_at TEXT
 );
 """
@@ -60,6 +63,12 @@ class Triage:
         self.conn.row_factory = sqlite3.Row
         with self.lock:
             self.conn.executescript(OWN_TABLES_SQL)
+            # migrate older triage_flags tables missing the keep column
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(triage_flags)")}
+            if "keep" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE triage_flags ADD COLUMN keep INTEGER NOT NULL DEFAULT 0"
+                )
             self.conn.commit()
         self._refresh()
 
@@ -118,6 +127,7 @@ class Triage:
                     "size": int(file_info.get("size_bytes", 0) or 0),
                     "collections": clip_cols.get(key, []),
                     "discard": bool(flags.get(key, {}).get("discard")),
+                    "keep": bool(flags.get(key, {}).get("keep")),
                 }
             )
         with self.lock:
@@ -155,6 +165,8 @@ class Triage:
         out = []
         for c in self._clips:
             if c["game"] != game or group not in c["groups"]:
+                continue
+            if c["keep"]:
                 continue
             if (
                 not show_sources
@@ -218,17 +230,25 @@ class Triage:
                 elif not add and collection_id in clip["collections"]:
                     clip["collections"].remove(collection_id)
 
-    def set_discard(self, key: str, discard: bool):
+    def _set_flag(self, key: str, field: str, value: bool):
+        assert field in ("discard", "keep")
         with self.lock:
             self.conn.execute(
-                "INSERT INTO triage_flags (clip_key, discard, rated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(clip_key) DO UPDATE SET discard=excluded.discard, rated_at=excluded.rated_at",
-                (key, 1 if discard else 0, utc_now()),
+                f"INSERT INTO triage_flags (clip_key, {field}, rated_at) VALUES (?, ?, ?) "
+                f"ON CONFLICT(clip_key) DO UPDATE SET {field}=excluded.{field}, "
+                "rated_at=excluded.rated_at",
+                (key, 1 if value else 0, utc_now()),
             )
             self.conn.commit()
             clip = self._clip(key)
             if clip is not None:
-                clip["discard"] = discard
+                clip[field] = value
+
+    def set_discard(self, key: str, discard: bool):
+        self._set_flag(key, "discard", discard)
+
+    def set_keep(self, key: str, keep: bool):
+        self._set_flag(key, "keep", keep)
 
 
 PAGE = """<!DOCTYPE html>
@@ -268,6 +288,8 @@ h2{margin-bottom:12px;font-size:20px}
 #prevb{background:#2c2c2e;color:#fff}
 #discardb{background:#3a1113;color:#ff453a}
 #discardb.on{background:#ff453a;color:#000}
+#keepb{background:#1c2b1c;color:#30d158}
+#keepb.on{background:#30d158;color:#000}
 #nextb{background:#0a84ff;color:#fff}
 #topbar{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#111;font-size:14px}
 #topbar button{background:#2c2c2e;border:none;color:#fff;border-radius:8px;padding:8px 12px;font-size:14px}
@@ -283,11 +305,12 @@ h2{margin-bottom:12px;font-size:20px}
       <span id="crumb"></span><span id="pos"></span>
       <button id="togsources" title="show raw sources with edits">src</button>
     </div>
-    <div id="stage"><video id="vid" playsinline controls preload="auto"></video>
+    <div id="stage"><video id="vid" playsinline controls preload="auto" loop muted></video>
       <div id="info"></div></div>
     <div id="cols"></div>
     <div id="actions">
       <button class="abtn" id="prevb">&#8592;</button>
+      <button class="abtn" id="keepb">Keep</button>
       <button class="abtn" id="discardb">Discard</button>
       <button class="abtn" id="nextb">&#8594;</button>
     </div>
@@ -326,6 +349,8 @@ function render(){const c=clips[idx];const v=$('vid');
     `<span class="friends">${fr}</span><div class="meta">${esc(c.game)} &middot; ${d} &middot; ${(c.size/1048576).toFixed(1)} MB</div>`;
   $('discardb').classList.toggle('on',!!c.discard);
   $('discardb').textContent=c.discard?'Marked discard':'Discard';
+  $('keepb').classList.toggle('on',!!c.keep);
+  $('keepb').textContent=c.keep?'Kept \u2713':'Keep';
   renderCols(c);}
 function renderCols(c){$('cols').innerHTML=collections.map(x=>{
     const on=c&&c.collections.includes(x.id);
@@ -348,6 +373,11 @@ $('discardb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.disca
     body:JSON.stringify({key:c.key,discard:v})});
   c.discard=v;$('discardb').classList.toggle('on',v);
   $('discardb').textContent=v?'Marked discard':'Discard';};
+$('keepb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.keep;
+  await api('/api/keep',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:c.key,keep:v})});
+  c.keep=v;
+  if(v)step(1);else render();};
 $('backb').onclick=()=>loadGroups();
 $('togsources').onclick=()=>{showSources=!showSources;$('togsources').style.background=showSources?'#0a84ff':'';
   idx=0;loadClips();};
@@ -422,6 +452,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             elif parsed.path == "/api/discard":
                 self.triage.set_discard(data["key"], bool(data["discard"]))
+                self._json({"ok": True})
+            elif parsed.path == "/api/keep":
+                self.triage.set_keep(data["key"], bool(data["keep"]))
                 self._json({"ok": True})
             else:
                 self._err(404, "not found")
