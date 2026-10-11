@@ -310,8 +310,8 @@ h2{margin-bottom:12px;font-size:20px}
     <div id="cols"></div>
     <div id="actions">
       <button class="abtn" id="prevb">&#8592;</button>
-      <button class="abtn" id="keepb">Keep</button>
       <button class="abtn" id="discardb">Discard</button>
+      <button class="abtn" id="keepb">Keep</button>
       <button class="abtn" id="nextb">&#8594;</button>
     </div>
   </div>
