@@ -374,7 +374,7 @@ function renderCols(c){$('cols').innerHTML=collections.map(x=>{
     const id=+b.dataset.id,on=b.classList.contains('on');const c=clips[idx];if(!c)return;
     const name=(collections.find(x=>x.id===id)||{}).name||'collection';
     try{
-      await api('/api/collect',{method:'POST',headers:{'Content-Type':'application/json'},
+      await api('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({key:c.key,collection_id:id,add:!on})});
       if(on)c.collections=c.collections.filter(i=>i!==id);else c.collections.push(id);
       renderCols(c);
@@ -468,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length) or b"{}")
             if parsed.path == "/api/collections":
                 self._json(self.triage.create_collection(data.get("name", "")))
-            elif parsed.path == "/api/collect":
+            elif parsed.path == "/api/file":
                 self.triage.set_collected(
                     data["key"], int(data["collection_id"]), bool(data["add"])
                 )
