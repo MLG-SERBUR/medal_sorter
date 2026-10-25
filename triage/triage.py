@@ -270,8 +270,8 @@ h2{margin-bottom:12px;font-size:20px}
 #viewer.active{display:flex}
 #stage{flex:1;position:relative;min-height:0;background:#000}
 #stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#info{position:absolute;left:0;right:0;bottom:48px;padding:8px 10px;
-  background:linear-gradient(transparent,rgba(0,0,0,.85));font-size:12px;pointer-events:none}
+#info{position:absolute;left:0;right:0;bottom:56px;padding:8px 10px;
+  font-size:12px;pointer-events:none}
 #info .friends{color:#ffd60a;font-weight:600}
 #info .meta{color:#aaa}
 .badge{display:inline-block;background:#0a84ff;border-radius:6px;padding:2px 8px;font-size:11px;margin-right:6px}
