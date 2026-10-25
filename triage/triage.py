@@ -278,10 +278,10 @@ h2{margin-bottom:12px;font-size:20px}
 .badge.edit{background:#30d158;color:#000}
 #togsources{position:absolute;top:8px;right:8px;z-index:2;border:0;border-radius:8px;
   padding:6px 9px;background:rgba(44,44,46,.8);color:#fff;font-size:12px}
-#cols{display:flex;gap:6px;overflow-x:auto;padding:6px 8px;background:#111;flex-wrap:nowrap}
-#review-options{padding:5px 10px;background:#111;color:#ccc;font-size:13px}
-#review-options label{display:flex;align-items:center;gap:8px}
+#skipmarked-option{position:absolute;top:8px;left:8px;z-index:2;display:flex;align-items:center;gap:7px;
+  padding:6px 9px;border-radius:8px;background:rgba(44,44,46,.85);color:#fff;font-size:12px}
 #skipmarked{width:18px;height:18px;accent-color:#0a84ff}
+#cols{display:flex;gap:6px;overflow-x:auto;padding:6px 8px;background:#111;flex-wrap:nowrap}
 .cbtn{flex:0 0 auto;border:2px solid #444;background:#1c1c1e;color:#fff;border-radius:20px;
   padding:7px 12px;font-size:14px;min-height:38px}
 .cbtn.on{border-color:#30d158;background:#30d158;color:#000;font-weight:700}
@@ -309,14 +309,14 @@ h2{margin-bottom:12px;font-size:20px}
   <div id="groups" class="screen"><h2 id="grouptitle">Groups</h2><div id="grouplist"></div></div>
   <div id="viewer">
     <div id="stage"><video id="vid" playsinline controls preload="auto" loop autoplay></video>
+      <label id="skipmarked-option"><input id="skipmarked" type="checkbox" checked>
+        Skip marked</label>
       <button id="togsources" title="show raw sources with edits">src</button>
       <div id="info"></div></div>
     <div id="cols"></div>
-      <div id="review-options"><label><input id="skipmarked" type="checkbox" checked>
-        Skip marked (Keep or Delete)</label></div>
-      <div id="actions">
-        <button class="abtn" id="prevb">&#8592;</button>
-        <button class="abtn" id="discardb" title="Mark for deletion; no files are deleted">Delete</button>
+    <div id="actions">
+      <button class="abtn" id="prevb">&#8592;</button>
+      <button class="abtn" id="discardb" title="Mark for deletion; no files are deleted">Delete</button>
       <button class="abtn" id="keepb">Keep</button>
       <button class="abtn" id="nextb">&#8594;</button>
     </div>
