@@ -13,8 +13,8 @@ file, keyed by medal-sorter's clip key (casefolded relative path).
 Then open http://<pc-ip>:8765 on your phone (same LAN, no auth).
 
 Stdlib only. No file operations: discard only marks. Clips autoplay with sound
-on loop when the browser allows it. Keep marks a clip as reviewed so it stops
-showing up in the queue, advancing to the next clip.
+on loop when the browser allows it. Keep and delete marks advance to the next
+clip; the queue can hide or show marked clips using its skip-marked toggle.
 """
 from __future__ import annotations
 
@@ -162,12 +162,12 @@ class Triage:
                 groups[g] += 1
         return [{"group": g, "clips": n} for g, n in sorted(groups.items())]
 
-    def clips(self, game: str, group: str, show_sources: bool):
+    def clips(self, game: str, group: str, show_sources: bool, skip_marked: bool = True):
         out = []
         for c in self._clips:
             if c["game"] != game or group not in c["groups"]:
                 continue
-            if c["keep"]:
+            if skip_marked and (c["keep"] or c["discard"]):
                 continue
             if (
                 not show_sources
@@ -279,6 +279,9 @@ h2{margin-bottom:12px;font-size:20px}
 #togsources{position:absolute;top:8px;right:8px;z-index:2;border:0;border-radius:8px;
   padding:6px 9px;background:rgba(44,44,46,.8);color:#fff;font-size:12px}
 #cols{display:flex;gap:6px;overflow-x:auto;padding:6px 8px;background:#111;flex-wrap:nowrap}
+#review-options{padding:5px 10px;background:#111;color:#ccc;font-size:13px}
+#review-options label{display:flex;align-items:center;gap:8px}
+#skipmarked{width:18px;height:18px;accent-color:#0a84ff}
 .cbtn{flex:0 0 auto;border:2px solid #444;background:#1c1c1e;color:#fff;border-radius:20px;
   padding:7px 12px;font-size:14px;min-height:38px}
 .cbtn.on{border-color:#30d158;background:#30d158;color:#000;font-weight:700}
@@ -309,9 +312,11 @@ h2{margin-bottom:12px;font-size:20px}
       <button id="togsources" title="show raw sources with edits">src</button>
       <div id="info"></div></div>
     <div id="cols"></div>
-    <div id="actions">
-      <button class="abtn" id="prevb">&#8592;</button>
-      <button class="abtn" id="discardb">Discard</button>
+      <div id="review-options"><label><input id="skipmarked" type="checkbox" checked>
+        Skip marked (Keep or Delete)</label></div>
+      <div id="actions">
+        <button class="abtn" id="prevb">&#8592;</button>
+        <button class="abtn" id="discardb" title="Mark for deletion; no files are deleted">Delete</button>
       <button class="abtn" id="keepb">Keep</button>
       <button class="abtn" id="nextb">&#8594;</button>
     </div>
@@ -320,7 +325,7 @@ h2{margin-bottom:12px;font-size:20px}
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let game=null,group=null,clips=[],idx=0,collections=[],showSources=false;
+let game=null,group=null,clips=[],idx=0,collections=[],showSources=false,skipMarked=true;
 async function api(p,o,retried){let r;
   try{r=await fetch(p,o);}catch(e){
     if(!retried){await new Promise(r=>setTimeout(r,600));return api(p,o,true);}
@@ -337,11 +342,13 @@ async function loadGames(){const g=await api('/api/games');
 async function loadGroups(){const g=await api('/api/groups?game='+encodeURIComponent(game));
   $('grouptitle').textContent=game;$('grouplist').innerHTML=g.map(x=>
     `<button class="chip" data-gr="${esc(x.group)}">${esc(x.group)}<small>${x.clips} clips</small></button>`).join('');
-  $('grouplist').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{group=b.dataset.gr;idx=0;loadClips();});
+  $('grouplist').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{group=b.dataset.gr;idx=0;clips=[];loadClips();});
   show('groups');}
-async function loadClips(){collections=await api('/api/collections');
+async function loadClips(preferredKey=null){collections=await api('/api/collections');
   clips=await api('/api/clips?game='+encodeURIComponent(game)+'&group='+encodeURIComponent(group)
-    +(showSources?'&show_sources=1':''));
+    +(showSources?'&show_sources=1':'')+'&skip_marked='+(skipMarked?'1':'0'));
+  const preferredIndex=preferredKey?clips.findIndex(c=>c.key===preferredKey):-1;
+  idx=preferredIndex>=0?preferredIndex:0;
   show('viewer');render();}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let toastT=null;
@@ -357,7 +364,7 @@ function render(){const c=clips[idx];const v=$('vid');
   $('info').innerHTML=`<span class="badge ${c.kind==='edit'?'edit':''}">${c.kind}</span>`+
     `<span class="friends">${fr}</span><div class="meta">${esc(c.game)} &middot; ${d} &middot; ${(c.size/1048576).toFixed(1)} MB &middot; ${idx+1} / ${clips.length}</div>`;
   $('discardb').classList.toggle('on',!!c.discard);
-  $('discardb').textContent=c.discard?'Marked discard':'Discard';
+  $('discardb').textContent=c.discard?'Marked delete':'Delete';
   $('keepb').classList.toggle('on',!!c.keep);
   $('keepb').textContent=c.keep?'Kept \u2713':'Keep';
   renderCols(c);}
@@ -380,22 +387,28 @@ function renderCols(c){$('cols').innerHTML=collections.map(x=>{
       body:JSON.stringify({name:n})});renderCols(clips[idx]);}
     catch(e){alert(e.message);}};}
 function step(d){if(!clips.length)return;idx=(idx+d+clips.length)%clips.length;render();}
+function advanceAfterMark(c){
+  if(skipMarked&&(c.keep||c.discard)){
+    clips.splice(idx,1);
+    if(idx>=clips.length)idx=0;
+    render();
+  }else step(1);
+}
 $('nextb').onclick=()=>step(1);$('prevb').onclick=()=>step(-1);
 $('discardb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.discard;
   try{
     await api('/api/discard',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({key:c.key,discard:v})});
-    c.discard=v;$('discardb').classList.toggle('on',v);
-    $('discardb').textContent=v?'Marked discard':'Discard';
-    toast(v?'Marked discard':'Discard cleared');
+    c.discard=v;toast(v?'Marked for deletion':'Delete mark cleared');advanceAfterMark(c);
   }catch(e){toast('Error: '+e.message);}};
 $('keepb').onclick=async()=>{const c=clips[idx];if(!c)return;const v=!c.keep;
   try{
     await api('/api/keep',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({key:c.key,keep:v})});
     c.keep=v;
-    if(v){toast('Kept');step(1);}else render();
+    toast(v?'Kept':'Keep mark cleared');advanceAfterMark(c);
   }catch(e){toast('Error: '+e.message);}};
+$('skipmarked').onchange=()=>{const key=clips[idx]?.key;skipMarked=$('skipmarked').checked;loadClips(key);};
 $('togsources').onclick=()=>{showSources=!showSources;$('togsources').style.background=showSources?'#0a84ff':'';
   idx=0;loadClips();};
 document.addEventListener('keydown',e=>{if(!$('viewer').classList.contains('active'))return;
@@ -444,6 +457,7 @@ class Handler(BaseHTTPRequestHandler):
                         q.get("game", [""])[0],
                         q.get("group", [""])[0],
                         show_sources=q.get("show_sources", [""])[0] == "1",
+                        skip_marked=q.get("skip_marked", ["1"])[0] == "1",
                     )
                 )
             elif parsed.path == "/api/collections":

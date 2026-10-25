@@ -9,10 +9,14 @@ same database file.
 
 ```powershell
 cd E:\GitHub\medal_sorter
-uv run triage/triage.py --workspace E:\GitHub\medal_sorter --medal-root W:\medal
+uv run triage/triage.py
 ```
 
-Then open `http://<pc-ip>:8765` on your phone (same LAN, no auth). Desktop
+The Medal root defaults to `W:\medal`, matching the `medal-sorter` commands.
+Pass `--medal-root <path>` only if your Medal folder is elsewhere.
+
+Then open [http://localhost:8765](http://localhost:8765) on this PC. On your phone,
+use the PC's LAN address (same LAN, no auth). Desktop
 works too.
 
 ## Flow
@@ -22,10 +26,11 @@ works too.
    when the browser permits autoplay with sound. If the browser blocks it,
    start playback with the player controls.
 3. File a clip into any of your own collections (toggle buttons, tap again to
-   remove), or mark it discard. Discard is mark-only; no files are moved or
+   remove), or mark it for deletion. Delete is mark-only; no files are moved or
    deleted, ever.
-4. Hit Keep on a reviewed clip (with or without a collection) and it advances
-   to the next one — kept clips stop appearing in the queue.
+4. Keep and Delete both advance to the next clip. The default-on "Skip marked"
+   checkbox hides clips marked Keep or Delete; turn it off to revisit or undo a
+   mark, then turn it back on to skip marked clips again.
 5. When a source clip has a linked edit, the edit is shown and the raw source
    is hidden unless you toggle "sources".
 
